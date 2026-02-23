@@ -16,13 +16,13 @@ import click
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 
-import akshare_patch
+from data import akshare_patch
 akshare_patch.patch()
 
-from market_data import MarketData
-from sector_data import SectorData
-from quant_strategy import QuantStrategy
-from stock_data import StockData
+from data.market_data import MarketData
+from data.sector_data import SectorData
+from strategy.quant_strategy import QuantStrategy
+from data.stock_data import StockData
 from db import Database, MarketSnapshot, SectorRecommendation, StockSignal, AINews, AISectorAnalysis
 
 
@@ -130,7 +130,7 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: L
                 pass
 
             if news:
-                from ai_news_generator import ai_news_generator
+                from ai.news_generator import ai_news_generator
 
                 # 生成结构化新闻
                 structured_news = ai_news_generator.generate_structured_news(news)
@@ -171,7 +171,7 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: L
                     })
 
                 # 调用AI板块分析
-                from ai_sector_analyzer import ai_sector_analyzer
+                from ai.sector_analyzer import ai_sector_analyzer
                 sector_analysis = ai_sector_analyzer.analyze_sectors(ai_news_list)
 
                 if sector_analysis.get('sector_analysis'):

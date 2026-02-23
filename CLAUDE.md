@@ -4,7 +4,7 @@
 基于 AI Agent 采集市场信息，AI 分析板块，给出板块核心个股判断的投资辅助工具。
 
 - **框架**: Streamlit (Python)
-- **数据源**: AKShare (A股行情), 金十数据/华尔街见闻 (新闻，当前暂停)
+- **数据源**: AKShare (A股行情), 多源新闻采集 (news_collector.py)
 - **AI**: OpenAI 兼容接口 (默认 DeepSeek)
 - **数据库**: SQLite (`stock_mvp/stock_mvp.db`)
 - **入口**: `stock_mvp/app.py`
@@ -13,20 +13,26 @@
 
 ```
 stock_mvp/
-├── app.py                 # Streamlit UI 主入口
-├── pipeline.py            # 收盘分析流水线编排
-├── market_data.py         # 市场数据采集 (指数/涨跌/成交额/北向资金)
-├── sector_data.py         # 板块评分与个股筛选 (带 DB 缓存)
-├── stock_data.py          # 个股行情与K线数据 (AKShare)
-├── quant_strategy.py      # 量化策略 (均线/RSI/量价/动量技术分析)
-├── ai_news_generator.py   # AI 结构化新闻生成
-├── ai_sector_analyzer.py  # AI 板块方向分析
-├── ai_analysis.py         # AI 市场分析 (已从 pipeline 移除)
-├── news_crawler.py        # 金十/华尔街见闻爬虫 (暂停使用)
-├── wordcloud_utils.py     # 关键词提取与词云工具
-├── db.py                  # SQLite 数据库 ORM
-├── config.py              # 配置管理 (.env)
-└── start.sh               # 启动脚本
+├── app.py                     # Streamlit UI 主入口
+├── pipeline.py                # 收盘分析流水线编排
+├── config.py                  # 配置管理 (.env)
+├── db.py                      # SQLite 数据库 ORM
+├── data/                      # 数据采集层
+│   ├── __init__.py
+│   ├── market_data.py         # 市场数据采集 (指数/涨跌/成交额/北向资金)
+│   ├── sector_data.py         # 板块评分与个股筛选 (带 DB 缓存)
+│   ├── stock_data.py          # 个股行情与K线数据 (AKShare)
+│   ├── news_collector.py      # 多源新闻采集 (9个RSS/网页源)
+│   └── akshare_patch.py       # AKShare 接口兼容补丁
+├── ai/                        # AI 分析层
+│   ├── __init__.py
+│   ├── news_generator.py      # AI 结构化新闻生成
+│   └── sector_analyzer.py     # AI 板块方向分析
+├── strategy/                  # 量化策略层
+│   ├── __init__.py
+│   └── quant_strategy.py      # 量化策略 (均线/RSI/量价/动量技术分析)
+├── tests/
+└── start.sh                   # 启动脚本
 ```
 
 ## UI 布局 (三大模块)
@@ -36,7 +42,7 @@ stock_mvp/
 顶部栏/deploy按钮/hamburger菜单全部通过 CSS 隐藏。
 
 ### Tab 1: 市场分析
-- **上方**: 新闻热点 (Treemap 矩形树图，面积=重要性，颜色=情绪) + AI新闻摘要列表
+- **上方**: 新闻热点 (HTML卡片网格，颜色=情绪) + AI新闻摘要列表
 - **下方**: 7大市场指数 + 市场广度 + 北向资金
 
 ### Tab 2: 板块分析
@@ -82,19 +88,16 @@ Step 5: 候选股票筛选 + 信号生成 → stock_signals 表
 
 ## 关键设计决策
 
-1. **新闻展示用 Treemap 替代词云**: 每个矩形=一条新闻，面积=重要性，颜色=情绪(绿利好/红利空/灰中性)，悬停看详情
+1. **新闻展示用 HTML 卡片网格**: 每张卡片=一条新闻，颜色=情绪(绿利好/红利空/灰中性)
 2. **新闻列表优先 AI 结构化新闻**: 显示情绪图标+标题(带超链接)+摘要+分类+重要性+关联板块
 3. **板块成分股 DB 缓存**: 同一天同一板块只请求一次 akshare，后续走 sector_stocks 表缓存
 4. **AI新闻生成 prompt 保留原始 URL**: 要求 AI 在输出中保留 source_url 字段
 5. **不使用 Streamlit sidebar**: 因 header/deploy/sidebar-toggle 绑定无法分离，改用页面顶部 expander
-6. **新闻爬取暂停**: market_data.py 中 get_news() 调用已注释，news_crawler.py 的金十/华尔街见闻暂不使用
+6. **多源新闻采集**: news_collector.py 支持 9 个 RSS/网页源自动采集
 
 ## 已知缺失/暂停模块
 
-- `ai_analyzer.py` - 不存在，原有错误导入已清理
-- `quant_strategy.py` - 原缺失，已创建 (均线/RSI/量价/动量分析)
-- 新闻爬取 - 暂停中，market_data.py 里 `result['news'] = []`
-- AI市场分析 (Step 6) - 已从 pipeline 移除
+- AI市场分析 (Step 6) - 已从 pipeline 移除，`ai_analysis_results` 表保留兼容历史数据
 
 ## CSS 主题
 

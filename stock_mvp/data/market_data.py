@@ -89,7 +89,7 @@ class MarketData:
         """获取财经新闻（多源采集，akshare 兜底）"""
         # 优先使用多源采集器
         try:
-            from news_collector import collect_all_news
+            from data.news_collector import collect_all_news
             news = collect_all_news(limit=limit, enabled_sources=enabled_sources)
             if news:
                 return news

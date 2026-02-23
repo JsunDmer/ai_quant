@@ -9,7 +9,7 @@ from datetime import datetime
 
 from config import config
 from db import db, FollowedStock
-from stock_data import stock_data
+from data.stock_data import stock_data
 
 
 st.set_page_config(
@@ -516,8 +516,33 @@ custom_css = """
 st.markdown(custom_css, unsafe_allow_html=True)
 
 
+def _search_stock(keyword: str) -> list:
+    """搜索股票（支持名称/代码/拼音，~100ms），返回匹配列表"""
+    import requests
+    try:
+        url = 'https://searchapi.eastmoney.com/api/suggest/get'
+        params = {
+            'input': keyword, 'type': 14, 'count': 8,
+            'token': 'D43BF722C8E33BDC906FB84D85E326E8',
+        }
+        r = requests.get(url, params=params, timeout=5)
+        items = r.json().get('QuotationCodeTable', {}).get('Data', [])
+        results = []
+        for item in items:
+            mkt = item.get('MktNum', '')
+            # 只保留沪深A股 (MktNum: 0=深, 1=沪)
+            if mkt not in ('0', '1'):
+                continue
+            code = item['Code']
+            results.append({'code': code, 'name': item['Name']})
+        return results
+    except Exception as e:
+        print(f"搜索股票失败: {e}")
+    return []
+
+
 def _lookup_stock(code: str) -> dict:
-    """根据股票代码查询信息（轻量单股接口，~50ms），返回 dict 或 None"""
+    """根据股票代码查询行情（~50ms），返回 dict 或 None"""
     import requests
     try:
         market = "1" if code.startswith("6") else "0"
@@ -589,7 +614,7 @@ def main():
 
         # --- 第二行: 新闻源开关 ---
         st.markdown("**📰 新闻源**")
-        from news_collector import ALL_SOURCE_NAMES
+        from data.news_collector import ALL_SOURCE_NAMES
         # 初始化 session_state
         if 'enabled_sources' not in st.session_state:
             st.session_state['enabled_sources'] = list(ALL_SOURCE_NAMES)
@@ -627,7 +652,7 @@ def main():
         import time as _time
         if _time.time() - _last_refresh > _interval * 60:
             try:
-                from market_data import MarketData
+                from data.market_data import MarketData
                 from db import MarketSnapshot
                 import json as _json
                 _m = MarketData()
@@ -938,36 +963,6 @@ def _render_indices_section(indices, market_breadth, turnover, north_flow):
             st.metric("北向资金", net_str)
 
 
-def _render_ai_market_analysis(news, indices):
-    st.markdown("---")
-    st.subheader("🤖 AI 市场分析")
-    
-    if st.button("生成 AI 分析", key="gen_ai_analysis"):
-        with st.spinner("AI 分析中..."):
-            try:
-                from ai_analysis import ai_analysis
-                from news_crawler import get_international_news
-                
-                intl_news = get_international_news(5)
-                us_indices = {}
-                
-                result = ai_analysis.analyze_market(news + intl_news, indices, us_indices)
-                
-                market_view = result.get("market_view", "未知")
-                key_insight = result.get("key_insight", "暂无分析")
-                hot_keywords = result.get("hot_keywords", [])
-                
-                view_color = {"乐观": "🟢", "中性偏乐观": "🔵", "中性": "⚪", "中性偏谨慎": "🟡", "谨慎": "🔴"}.get(market_view, "⚪")
-                
-                st.markdown(f"**市场观点:** {view_color} {market_view}")
-                st.markdown(f"**核心洞察:** {key_insight}")
-                if hot_keywords:
-                    st.markdown(f"**热点关键词:** {', '.join(hot_keywords[:5])}")
-                    
-            except Exception as e:
-                st.error(f"AI 分析失败: {e}")
-
-
 def render_sector_analysis():
     import json
 
@@ -1259,24 +1254,41 @@ def render_quant_signals():
 
     # ===== 添加个股 =====
     with st.expander("➕ 添加自持个股", expanded=False):
-        # Step 1: 搜索
+        # Step 1: 搜索（支持名称/代码/拼音）
         col_search, col_btn = st.columns([3, 1])
         with col_search:
-            search_code = st.text_input("股票代码", placeholder="例: 600519", key="search_stock_code")
+            search_kw = st.text_input("搜索股票", placeholder="输入名称、代码或拼音，如: 茅台 / 600519 / mt", key="search_stock_kw")
         with col_btn:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🔍 搜索", use_container_width=True):
-                code = search_code.strip()
-                if code:
-                    with st.spinner("查询中..."):
-                        result = _lookup_stock(code)
-                    if result:
-                        st.session_state['_found_stock'] = {'code': code, **result}
-                    else:
+                kw = search_kw.strip()
+                if kw:
+                    with st.spinner("搜索中..."):
+                        results = _search_stock(kw)
+                    if results:
+                        st.session_state['_search_results'] = results
                         st.session_state.pop('_found_stock', None)
-                        st.warning(f"未找到代码 {code}，请检查是否正确")
+                    else:
+                        st.session_state.pop('_search_results', None)
+                        st.session_state.pop('_found_stock', None)
+                        st.warning(f"未找到「{kw}」相关股票")
 
-        # Step 2: 显示搜索结果 + 添加表单
+        # Step 2: 显示搜索结果列表，点击选择
+        search_results = st.session_state.get('_search_results')
+        if search_results and not st.session_state.get('_found_stock'):
+            cols = st.columns(min(len(search_results), 4))
+            for i, item in enumerate(search_results[:8]):
+                with cols[i % 4]:
+                    if st.button(f"{item['name']}\n{item['code']}", key=f"pick_{item['code']}", use_container_width=True):
+                        with st.spinner("查询行情..."):
+                            detail = _lookup_stock(item['code'])
+                        if detail:
+                            st.session_state['_found_stock'] = {'code': item['code'], **detail}
+                        else:
+                            st.session_state['_found_stock'] = {'code': item['code'], 'name': item['name'], 'price': 0, 'change': 0}
+                        st.rerun()
+
+        # Step 3: 选中后显示行情 + 添加表单
         found = st.session_state.get('_found_stock')
         if found:
             chg = found['change']
@@ -1307,21 +1319,62 @@ def render_quant_signals():
                     )
                     db.add_stock(new_stock)
                     st.session_state.pop('_found_stock', None)
+                    st.session_state.pop('_search_results', None)
                     st.success(f"已添加 {found['name']}({found['code']})")
                     st.rerun()
 
-    # ===== 持仓列表 =====
+    # ===== 持仓列表（支持修改） =====
     if user_positions:
         for pos in user_positions:
-            col_info, col_data, col_action = st.columns([3, 3, 1])
-            with col_info:
-                st.markdown(f"**{pos.stock_name}** ({pos.stock_code})")
-            with col_data:
-                st.caption(f"成本: {pos.cost_price:.2f} | 数量: {pos.volume} | 报警: ±{pos.alarm_percent}%")
-            with col_action:
-                if st.button("删除", key=f"del_{pos.stock_code}", type="secondary"):
-                    db.remove_stock(pos.stock_code)
-                    st.rerun()
+            edit_key = f"_edit_{pos.stock_code}"
+            is_editing = st.session_state.get(edit_key, False)
+
+            if not is_editing:
+                # 展示模式
+                col_info, col_data, col_edit, col_del = st.columns([3, 4, 1, 1])
+                with col_info:
+                    st.markdown(f"**{pos.stock_name}** ({pos.stock_code})")
+                with col_data:
+                    st.caption(f"成本: {pos.cost_price:.2f} | 数量: {pos.volume} | 报警: ±{pos.alarm_percent}%")
+                with col_edit:
+                    if st.button("修改", key=f"edit_{pos.stock_code}"):
+                        st.session_state[edit_key] = True
+                        st.rerun()
+                with col_del:
+                    if st.button("删除", key=f"del_{pos.stock_code}", type="secondary"):
+                        db.remove_stock(pos.stock_code)
+                        st.rerun()
+            else:
+                # 编辑模式
+                st.markdown(f"✏️ 修改 **{pos.stock_name}** ({pos.stock_code})")
+                with st.form(f"edit_form_{pos.stock_code}"):
+                    col_b, col_c = st.columns(2)
+                    with col_b:
+                        edit_cost = st.number_input("成本价", min_value=0.0, value=float(pos.cost_price), step=0.01, format="%.2f", key=f"ec_{pos.stock_code}")
+                        edit_volume = st.number_input("持仓数量(股)", min_value=0, value=int(pos.volume), step=100, key=f"ev_{pos.stock_code}")
+                    with col_c:
+                        edit_alarm_pct = st.number_input("报警涨跌幅(%)", min_value=0.0, value=float(pos.alarm_percent), step=0.5, format="%.1f", key=f"ea_{pos.stock_code}")
+                        edit_alarm_price = st.number_input("报警价格", min_value=0.0, value=float(pos.alarm_price), step=0.01, format="%.2f", key=f"ep_{pos.stock_code}")
+
+                    col_save, col_cancel = st.columns(2)
+                    with col_save:
+                        if st.form_submit_button("💾 保存", type="primary", use_container_width=True):
+                            updated = FollowedStock(
+                                stock_code=pos.stock_code,
+                                stock_name=pos.stock_name,
+                                cost_price=edit_cost,
+                                volume=edit_volume,
+                                alarm_percent=edit_alarm_pct,
+                                alarm_price=edit_alarm_price,
+                            )
+                            db.add_stock(updated)
+                            st.session_state[edit_key] = False
+                            st.success(f"已更新 {pos.stock_name}")
+                            st.rerun()
+                    with col_cancel:
+                        if st.form_submit_button("取消", use_container_width=True):
+                            st.session_state[edit_key] = False
+                            st.rerun()
     else:
         st.info("暂无持仓，点击上方「添加自持个股」添加")
 
