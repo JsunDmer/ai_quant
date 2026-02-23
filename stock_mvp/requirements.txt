@@ -1,0 +1,34 @@
+# Stock MVP Requirements
+
+# UI Framework
+streamlit>=1.30.0
+
+# Data Fetching
+akshare>=1.12.0
+requests>=2.31.0
+
+# Database
+sqlite3-api  # built-in, no need to install
+
+# AI/LLM
+openai>=1.12.0
+
+# Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Visualization
+plotly>=5.18.0
+
+# Sentiment Analysis
+transformers>=4.36.0
+torch>=2.0.0
+
+# Chinese Text Processing
+jieba>=0.42.1
+
+# Scheduling
+schedule>=1.2.0
+
+# Utils
+python-dotenv>=1.0.0
