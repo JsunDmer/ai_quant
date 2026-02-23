@@ -16,6 +16,9 @@ import click
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 
+import akshare_patch
+akshare_patch.patch()
+
 from market_data import MarketData
 from sector_data import SectorData
 from quant_strategy import QuantStrategy
@@ -47,15 +50,17 @@ def get_trading_date(date_str: Optional[str] = None) -> tuple[str, str]:
     return target.strftime('%Y-%m-%d'), target.strftime('%Y-%m-%d')
 
 
-def run_post_close_pipeline(trade_date: Optional[str] = None) -> Dict[str, Any]:
+def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: List[str] = None, ai_enabled: bool = True) -> Dict[str, Any]:
     """
     执行收盘后流水线
-    
+
     Args:
         trade_date: 指定交易日期，None 则自动获取最近交易日
-    
+        enabled_sources: 启用的新闻源列表，None 表示全部启用
+        ai_enabled: 是否启用AI分析（新闻生成+板块分析）
+
     Returns:
-        dict with status, trade_date, data_date, market_snapshot, 
+        dict with status, trade_date, data_date, market_snapshot,
                sector_recommendations, stock_signals
     """
     # Step 1: 确定交易日期
@@ -83,7 +88,7 @@ def run_post_close_pipeline(trade_date: Optional[str] = None) -> Dict[str, Any]:
     # Step 2: 市场快照采集
     print("[Pipeline Step 1/5] 采集市场快照...")
     try:
-        snapshot = market.collect_post_close_snapshot(trade_date)
+        snapshot = market.collect_post_close_snapshot(trade_date, enabled_sources=enabled_sources)
         result['market_snapshot'] = snapshot
         
         # 保存到数据库
@@ -109,71 +114,77 @@ def run_post_close_pipeline(trade_date: Optional[str] = None) -> Dict[str, Any]:
         print(f"[Pipeline] 市场快照采集失败: {e}")
     
     # Step 2: AI新闻生成
-    print("[Pipeline Step 2/6] AI新闻生成...")
     structured_news = []
-    try:
-        # 获取原始新闻
-        news = []
+    if not ai_enabled:
+        print("[Pipeline Step 2/6] AI分析已关闭，跳过AI新闻生成")
+    else:
+        print("[Pipeline Step 2/6] AI新闻生成...")
         try:
-            snapshot = result.get('market_snapshot')
-            if snapshot:
-                news = snapshot.get('news', [])
-        except:
-            pass
-        
-        if news:
-            from ai_news_generator import ai_news_generator
-            
-            # 生成结构化新闻
-            structured_news = ai_news_generator.generate_structured_news(news)
-            
-            if structured_news:
-                # 保存到数据库
-                ai_news_generator.save_to_db(trade_date, structured_news)
-                print(f"[Pipeline] AI新闻已生成，共 {len(structured_news)} 条")
+            # 获取原始新闻
+            news = []
+            try:
+                snapshot = result.get('market_snapshot')
+                if snapshot:
+                    news = snapshot.get('news', [])
+            except:
+                pass
+
+            if news:
+                from ai_news_generator import ai_news_generator
+
+                # 生成结构化新闻
+                structured_news = ai_news_generator.generate_structured_news(news)
+
+                if structured_news:
+                    # 保存到数据库
+                    ai_news_generator.save_to_db(trade_date, structured_news)
+                    print(f"[Pipeline] AI新闻已生成，共 {len(structured_news)} 条")
+                else:
+                    print("[Pipeline] AI新闻生成返回空结果")
             else:
-                print("[Pipeline] AI新闻生成返回空结果")
-        else:
-            print("[Pipeline] 无原始新闻，跳过AI新闻生成")
-            
-    except Exception as e:
-        result['errors'].append(f'ai_news_generation: {str(e)}')
-        print(f"[Pipeline] AI新闻生成失败: {e}")
-    
+                print("[Pipeline] 无原始新闻，跳过AI新闻生成")
+
+        except Exception as e:
+            result['errors'].append(f'ai_news_generation: {str(e)}')
+            print(f"[Pipeline] AI新闻生成失败: {e}")
+
     # Step 3: AI板块分析
-    print("[Pipeline Step 3/7] AI板块分析...")
-    try:
-        # 从数据库获取AI生成的新闻
-        ai_news_records = db.get_ai_news(trade_date)
-        
-        if ai_news_records:
-            # 转换为dict格式
-            ai_news_list = []
-            for news in ai_news_records:
-                ai_news_list.append({
-                    'title': news.title,
-                    'summary': news.summary,
-                    'category': news.category,
-                    'sentiment': news.sentiment,
-                    'keywords_json': news.keywords_json,
-                    'related_sectors_json': news.related_sectors_json
-                })
-            
-            # 调用AI板块分析
-            from ai_sector_analyzer import ai_sector_analyzer
-            sector_analysis = ai_sector_analyzer.analyze_sectors(ai_news_list)
-            
-            if sector_analysis.get('sector_analysis'):
-                ai_sector_analyzer.save_to_db(trade_date, sector_analysis)
-                print(f"[Pipeline] AI板块分析完成，分析了 {len(sector_analysis['sector_analysis'])} 个板块")
+    if not ai_enabled:
+        print("[Pipeline Step 3/7] AI分析已关闭，跳过AI板块分析")
+    else:
+        print("[Pipeline Step 3/7] AI板块分析...")
+        try:
+            # 从数据库获取AI生成的新闻
+            ai_news_records = db.get_ai_news(trade_date)
+
+            if ai_news_records:
+                # 转换为dict格式
+                ai_news_list = []
+                for news in ai_news_records:
+                    ai_news_list.append({
+                        'title': news.title,
+                        'summary': news.summary,
+                        'category': news.category,
+                        'sentiment': news.sentiment,
+                        'keywords_json': news.keywords_json,
+                        'related_sectors_json': news.related_sectors_json
+                    })
+
+                # 调用AI板块分析
+                from ai_sector_analyzer import ai_sector_analyzer
+                sector_analysis = ai_sector_analyzer.analyze_sectors(ai_news_list)
+
+                if sector_analysis.get('sector_analysis'):
+                    ai_sector_analyzer.save_to_db(trade_date, sector_analysis)
+                    print(f"[Pipeline] AI板块分析完成，分析了 {len(sector_analysis['sector_analysis'])} 个板块")
+                else:
+                    print("[Pipeline] AI板块分析返回空结果")
             else:
-                print("[Pipeline] AI板块分析返回空结果")
-        else:
-            print("[Pipeline] 无AI新闻数据，跳过AI板块分析")
-            
-    except Exception as e:
-        result['errors'].append(f'ai_sector_analysis: {str(e)}')
-        print(f"[Pipeline] AI板块分析失败: {e}")
+                print("[Pipeline] 无AI新闻数据，跳过AI板块分析")
+
+        except Exception as e:
+            result['errors'].append(f'ai_sector_analysis: {str(e)}')
+            print(f"[Pipeline] AI板块分析失败: {e}")
     
     # Step 4: 板块评分与推荐
     print("[Pipeline Step 3/6] 板块评分与推荐...")

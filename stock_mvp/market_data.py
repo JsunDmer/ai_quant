@@ -85,8 +85,19 @@ class MarketData:
         # 北向资金接口暂不可用，返回空数据
         return {'north': 0, 'south': 0}
     
-    def get_news(self, limit: int = 10) -> List[Dict[str, str]]:
-        """获取财经快讯"""
+    def get_news(self, limit: int = 10, enabled_sources: list = None) -> List[Dict[str, str]]:
+        """获取财经新闻（多源采集，akshare 兜底）"""
+        # 优先使用多源采集器
+        try:
+            from news_collector import collect_all_news
+            news = collect_all_news(limit=limit, enabled_sources=enabled_sources)
+            if news:
+                return news
+            print("多源采集返回空结果，尝试 akshare 兜底")
+        except Exception as e:
+            print(f"多源采集失败: {e}")
+
+        # 兜底: akshare
         try:
             df = ak.stock_news_em(symbol="财经新闻")
             if df.empty:
@@ -94,15 +105,18 @@ class MarketData:
             news = []
             for _, row in df.head(limit).iterrows():
                 news.append({
-                    'title': str(row['新闻标题'])[:100],
-                    'time': str(row['发布时间'])
+                    'title': str(row.get('新闻标题', ''))[:100],
+                    'content': str(row.get('新闻内容', ''))[:500],
+                    'time': str(row.get('发布时间', '')),
+                    'source': str(row.get('文章来源', '')),
+                    'url': str(row.get('新闻链接', '')),
                 })
             return news
         except Exception as e:
-            print(f"获取快讯失败: {e}")
+            print(f"akshare 兜底也失败: {e}")
             return []
     
-    def collect_post_close_snapshot(self, trade_date: Optional[str] = None) -> Dict[str, Any]:
+    def collect_post_close_snapshot(self, trade_date: Optional[str] = None, enabled_sources: list = None) -> Dict[str, Any]:
         """
         采集收盘后市场快照
         """
@@ -144,8 +158,11 @@ class MarketData:
             result['north_flow'] = {}
             print(f"北向资金采集失败: {e}")
         
-        # 新闻爬取暂停
-        result['news'] = []
+        try:
+            result['news'] = self.get_news(enabled_sources=enabled_sources)
+        except Exception as e:
+            result['news'] = []
+            print(f"快讯采集失败: {e}")
         
         # 检查是否需要降级
         if not result['indices'] and not result['market_breadth']:

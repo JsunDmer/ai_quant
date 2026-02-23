@@ -525,13 +525,16 @@ def main():
         if st.button("🚀 执行分析", type="primary", use_container_width=True):
             with st.spinner("正在分析市场数据..."):
                 from pipeline import run_post_close_pipeline
-                run_post_close_pipeline()
+                sources = st.session_state.get('enabled_sources')
+                ai_on = st.session_state.get('ai_analysis_enabled', True)
+                run_post_close_pipeline(enabled_sources=sources, ai_enabled=ai_on)
             st.success("分析完成！")
             st.rerun()
 
     # ========== 设置面板（可展开/收起） ==========
     with st.expander("⚙️ 设置", expanded=False):
-        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+        # --- 第一行: API / 定时 / AI开关 ---
+        col_s1, col_s2, col_s3 = st.columns(3)
 
         with col_s1:
             api_key = st.text_input("LLM API Key", value=config.LLM_API_KEY, type="password")
@@ -541,25 +544,42 @@ def main():
             schedule_time = st.time_input("执行时间", value=None, help="每日自动执行的时间(16:00为收盘后)")
 
         with col_s3:
-            st.markdown("**📰 新闻源**")
-            use_jin10 = st.checkbox("金十数据", value=True)
-            use_wallstreetcn = st.checkbox("华尔街见闻", value=True)
-
-        with col_s4:
-            ai_analysis_enabled = st.toggle("启用AI分析", value=True, help="执行分析时自动调用AI生成关键词和洞察")
+            # 定时开启时，AI分析自动绑定并锁定
+            if schedule_enabled:
+                ai_analysis_enabled = True
+                st.toggle("启用AI分析", value=True, disabled=True,
+                          help="自动执行模式下 AI 分析默认开启", key="ai_toggle")
+                st.caption("🔗 自动执行已绑定AI分析")
+            else:
+                ai_analysis_enabled = st.toggle("启用AI分析", value=True,
+                                                help="执行分析时自动调用AI生成关键词和洞察", key="ai_toggle")
+            st.session_state['ai_analysis_enabled'] = ai_analysis_enabled
             latest_snapshot = db.get_latest_market_snapshot()
             if latest_snapshot:
                 st.caption(f"📅 上次数据: {latest_snapshot.trade_date}")
 
+        # --- 第二行: 新闻源开关 ---
+        st.markdown("**📰 新闻源**")
+        from news_collector import ALL_SOURCE_NAMES
+        # 初始化 session_state
+        if 'enabled_sources' not in st.session_state:
+            st.session_state['enabled_sources'] = list(ALL_SOURCE_NAMES)
+
+        src_cols = st.columns(5)
+        for i, name in enumerate(ALL_SOURCE_NAMES):
+            with src_cols[i % 5]:
+                checked = st.checkbox(name, value=(name in st.session_state['enabled_sources']), key=f"src_{name}")
+                if checked and name not in st.session_state['enabled_sources']:
+                    st.session_state['enabled_sources'].append(name)
+                elif not checked and name in st.session_state['enabled_sources']:
+                    st.session_state['enabled_sources'].remove(name)
+
         # 检查是否需要自动执行
         if schedule_enabled and schedule_time:
-            import datetime
-            now = datetime.datetime.now()
-            current_time = now.time()
-
-            if current_time >= schedule_time:
+            now = datetime.now()
+            if now.time() >= schedule_time:
                 if latest_snapshot is None or latest_snapshot.trade_date != now.strftime('%Y-%m-%d'):
-                    st.info("已到达定时时间，请点击上方按钮执行分析")
+                    st.info("⏰ 已到达定时时间，请点击上方按钮执行分析")
 
     # ========== 三大模块 Tab ==========
     tab1, tab2, tab3 = st.tabs(["📊 市场分析", "🎯 板块分析", "💰 个股分析"])
@@ -642,7 +662,6 @@ def render_market_overview():
 def _render_wordcloud_section(all_news, trade_date=None):
     st.subheader("📰 新闻热点")
     import json
-    import plotly.graph_objects as go
 
     ai_news_list = None
 
@@ -650,219 +669,160 @@ def _render_wordcloud_section(all_news, trade_date=None):
     if trade_date:
         ai_news_list = db.get_ai_news(trade_date)
 
-    # 2. 有AI新闻 → 用 Treemap 展示每条新闻核心内容
+    # 2. 有AI新闻 → 用卡片网格展示
     if ai_news_list:
         st.caption("🤖 数据来源: AI结构化分析")
-        _render_news_treemap(ai_news_list)
+        _render_news_cards(ai_news_list)
     elif all_news:
-        # 无AI新闻时，用原始新闻标题做简易展示
         st.caption("📝 数据来源: 原始新闻")
         titles = [n.get("title", "") for n in all_news if isinstance(n, dict) and n.get("title")]
         if titles:
-            _render_raw_news_treemap(titles)
-
-    # ========== 新闻列表 ==========
-    _render_news_list(ai_news_list, all_news)
+            _render_raw_news_cards(titles)
 
 
-def _render_news_treemap(ai_news_list):
-    """用 Treemap 展示AI新闻核心内容：面积=重要性，颜色=情绪"""
+def _render_news_cards(ai_news_list):
+    """用 HTML 卡片网格展示AI新闻：左边框=情绪颜色，信息丰富"""
     import json
-    import plotly.graph_objects as go
 
-    # 情绪颜色映射
-    sentiment_colors = {
-        "positive": "#10b981",
-        "negative": "#ef4444",
-        "neutral": "#64748b",
+    sentiment_cfg = {
+        "positive": ("#10b981", "🟢", "利好"),
+        "negative": ("#ef4444", "🔴", "利空"),
+        "neutral":  ("#94a3b8", "⚪", "中性"),
     }
 
-    labels = []
-    parents = []
-    values = []
-    colors = []
-    hovertexts = []
-
-    # 按分类分组
-    categories = {}
+    cards_html = []
     for n in ai_news_list:
-        cat = n.category or "其他"
-        if cat not in categories:
-            categories[cat] = []
-        categories[cat].append(n)
+        sentiment = n.sentiment or "neutral"
+        color, emoji, label = sentiment_cfg.get(sentiment, ("#94a3b8", "⚪", "中性"))
+        importance = max(n.importance or 5, 1)
+        title = n.title or ""
+        summary = n.summary or ""
+        cat = n.category or ""
+        url = n.source_url or ""
 
-    # 根节点
-    labels.append("今日新闻")
-    parents.append("")
-    values.append(0)
-    colors.append("#f8fafc")
-    hovertexts.append("")
+        # 关联板块
+        sector_tags = ""
+        try:
+            sectors = json.loads(n.related_sectors_json) if n.related_sectors_json else []
+            if sectors:
+                sector_tags = "".join(
+                    f'<span class="nc-sector">{s}</span>' for s in sectors[:3]
+                )
+        except Exception:
+            pass
 
-    for cat, news_items in categories.items():
-        # 分类节点
-        labels.append(cat)
-        parents.append("今日新闻")
-        values.append(0)
-        colors.append("#e2e8f0")
-        hovertexts.append(f"{cat}类新闻 {len(news_items)} 条")
+        # 重要性星级
+        stars = "★" * min(importance // 2, 5) + "☆" * max(0, 5 - importance // 2)
 
-        for n in news_items:
-            importance = max(n.importance or 5, 2)
-            sentiment = n.sentiment or "neutral"
-            color = sentiment_colors.get(sentiment, "#64748b")
+        # 标题：有链接则可点击
+        if url:
+            title_html = f'<a href="{url}" target="_blank" class="nc-link">{title}</a>'
+        else:
+            title_html = title
 
-            # 标题截断，保证可读性
-            title = n.title or ""
-            if len(title) > 20:
-                title = title[:18] + "..."
+        card = f'''<div class="nc-card" style="border-left:4px solid {color};">
+  <div class="nc-header">
+    <span class="nc-emoji">{emoji}</span>
+    <span class="nc-label" style="color:{color};">{label}</span>
+    <span class="nc-stars" style="color:{color};">{stars}</span>
+  </div>
+  <div class="nc-title">{title_html}</div>
+  <div class="nc-summary">{summary}</div>
+  <div class="nc-footer">
+    <span class="nc-cat">{cat}</span>
+    {sector_tags}
+  </div>
+</div>'''
+        cards_html.append(card)
 
-            summary = n.summary or ""
+    n_cols = 3 if len(ai_news_list) > 4 else 2
+    grid_css = f"""
+<style>
+.nc-grid {{
+  display: grid;
+  grid-template-columns: repeat({n_cols}, 1fr);
+  gap: 10px;
+  margin-bottom: 8px;
+}}
+.nc-card {{
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: box-shadow .15s;
+}}
+.nc-card:hover {{ box-shadow: 0 2px 8px rgba(0,0,0,.08); }}
+.nc-header {{
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}}
+.nc-emoji {{ font-size: 14px; }}
+.nc-label {{ font-weight: 600; }}
+.nc-stars {{ margin-left: auto; font-size: 11px; letter-spacing: 1px; }}
+.nc-title {{
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: #1e293b;
+}}
+.nc-link {{ color: #1e293b; text-decoration: none; }}
+.nc-link:hover {{ color: #3b82f6; text-decoration: underline; }}
+.nc-summary {{
+  font-size: 12px;
+  color: #475569;
+  line-height: 1.6;
+}}
+.nc-footer {{
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}}
+.nc-cat {{
+  background: #e2e8f0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #475569;
+  font-weight: 500;
+}}
+.nc-sector {{
+  background: #dbeafe;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #2563eb;
+}}
+</style>
+"""
+    html = grid_css + '<div class="nc-grid">' + "\n".join(cards_html) + "</div>"
+    st.markdown(html, unsafe_allow_html=True)
+    st.caption("🟢 利好 &nbsp;&nbsp; 🔴 利空 &nbsp;&nbsp; ⚪ 中性 &nbsp;&nbsp; | &nbsp;&nbsp; ★ = 重要程度")
 
-            # 关联板块
-            sector_text = ""
-            try:
-                sectors = json.loads(n.related_sectors_json) if n.related_sectors_json else []
-                if sectors:
-                    sector_text = f"<br>关联板块: {', '.join(sectors[:3])}"
-            except:
-                pass
 
-            labels.append(title)
-            parents.append(cat)
-            values.append(importance)
-            colors.append(color)
-            hovertexts.append(
-                f"<b>{n.title}</b><br><br>"
-                f"{summary}<br><br>"
-                f"重要性: {importance}/10 | "
-                f"情绪: {'利好' if sentiment == 'positive' else '利空' if sentiment == 'negative' else '中性'}"
-                f"{sector_text}"
-            )
+def _render_raw_news_cards(titles):
+    """原始新闻标题的简易卡片网格"""
+    palette = ["#3b82f6", "#6366f1", "#8b5cf6", "#0ea5e9", "#14b8a6",
+               "#f59e0b", "#ef4444", "#ec4899", "#10b981", "#64748b"]
 
-    fig = go.Figure(go.Treemap(
-        labels=labels,
-        parents=parents,
-        values=values,
-        marker=dict(
-            colors=colors,
-            line=dict(width=2, color="white"),
-        ),
-        textinfo="label",
-        textfont=dict(size=13, family="Noto Sans SC, sans-serif"),
-        hovertext=hovertexts,
-        hoverinfo="text",
-        pathbar=dict(visible=False),
-    ))
-
-    fig.update_layout(
-        height=400,
-        margin=dict(l=5, r=5, t=5, b=5),
-        paper_bgcolor="white",
-    )
-
-    st.plotly_chart(fig, use_container_width=True, key="news_treemap")
-
-    # 图例说明
-    st.caption("🟢 利好 &nbsp;&nbsp; 🔴 利空 &nbsp;&nbsp; ⚫ 中性 &nbsp;&nbsp; | &nbsp;&nbsp; 面积大小 = 重要程度，悬停查看详情")
-
-
-def _render_raw_news_treemap(titles):
-    """原始新闻标题的简易 Treemap"""
-    import plotly.graph_objects as go
-
-    labels = ["今日新闻"]
-    parents = [""]
-    values = [0]
-    colors = ["#f8fafc"]
-
+    cards_html = []
     for i, title in enumerate(titles[:15]):
-        display = title if len(title) <= 20 else title[:18] + "..."
-        labels.append(display)
-        parents.append("今日新闻")
-        values.append(max(15 - i, 3))
-        colors.append("#3b82f6")
+        color = palette[i % len(palette)]
+        card = f'''<div style="background:{color};color:white;border-radius:6px;
+padding:8px 12px;font-size:13px;font-weight:500;line-height:1.4;">{title}</div>'''
+        cards_html.append(card)
 
-    fig = go.Figure(go.Treemap(
-        labels=labels,
-        parents=parents,
-        values=values,
-        marker=dict(colors=colors, line=dict(width=2, color="white")),
-        textinfo="label",
-        textfont=dict(size=13, family="Noto Sans SC, sans-serif"),
-        hovertext=labels,
-        hoverinfo="text",
-        pathbar=dict(visible=False),
-    ))
-
-    fig.update_layout(
-        height=350,
-        margin=dict(l=5, r=5, t=5, b=5),
-        paper_bgcolor="white",
-    )
-
-    st.plotly_chart(fig, use_container_width=True, key="news_treemap_raw")
-
-
-def _render_news_list(ai_news_list, raw_news):
-    """渲染新闻列表，优先使用AI结构化新闻"""
-    import json
-
-    sentiment_map = {
-        "positive": ("🟢", "利好"),
-        "negative": ("🔴", "利空"),
-        "neutral": ("⚪", "中性"),
-    }
-
-    # 优先展示AI新闻
-    if ai_news_list:
-        st.markdown(f"**📰 AI新闻摘要** ({len(ai_news_list)}条)")
-
-        for n in ai_news_list:
-            icon, label = sentiment_map.get(n.sentiment, ("⚪", "中性"))
-            importance = n.importance or 5
-
-            # 标题行：带链接
-            title_display = n.title
-            if n.source_url:
-                title_display = f"[{n.title}]({n.source_url})"
-
-            # 分类和重要性标签
-            category = n.category or ""
-            importance_stars = "★" * min(importance // 2, 5)
-
-            st.markdown(
-                f"{icon} **{title_display}**\n\n"
-                f"> {n.summary}\n\n"
-                f"`{category}` | 重要性: {importance_stars} ({importance}/10)"
-            )
-
-            # 关联板块
-            try:
-                sectors = json.loads(n.related_sectors_json) if n.related_sectors_json else []
-                if sectors:
-                    sector_tags = " ".join([f"`{s}`" for s in sectors[:4]])
-                    st.caption(f"关联板块: {sector_tags}")
-            except:
-                pass
-
-            st.markdown("---")
-
-    # 如果没有AI新闻，回退到原始新闻
-    elif raw_news:
-        st.markdown(f"**📰 新闻列表** ({len(raw_news)}条)")
-        for n in raw_news[:15]:
-            if isinstance(n, dict):
-                title = n.get("title", "")
-                url = n.get("url", "")
-                source = n.get("source", "")
-                if title:
-                    source_label = f" ({source})" if source else ""
-                    if url:
-                        st.markdown(f"- [{title}]({url}){source_label}")
-                    else:
-                        st.markdown(f"- {title}{source_label}")
-    else:
-        st.info("暂无新闻数据")
+    n_cols = 3 if len(titles) > 4 else 2
+    html = f"""
+<div style="display:grid;grid-template-columns:repeat({n_cols},1fr);gap:8px;margin-bottom:8px;">
+{"".join(cards_html)}
+</div>"""
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def _render_indices_section(indices, market_breadth, turnover, north_flow):

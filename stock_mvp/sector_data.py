@@ -109,12 +109,16 @@ class SectorData:
         """获取板块资金流向"""
         try:
             df = ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")
-            row = df[df['板块名称'] == sector_name]
+            # 兼容新旧字段名
+            name_col = '名称' if '名称' in df.columns else '板块名称'
+            row = df[df[name_col] == sector_name]
             if not row.empty:
                 r = row.iloc[0]
+                inflow_col = next((c for c in r.index if '主力净流入' in c and '净额' in c), None)
+                pct_col = next((c for c in r.index if '主力净流入' in c and '净占比' in c), None)
                 return {
-                    'main_inflow': float(r['主力净流入-净额']) if '主力净流入-净额' in r else 0,
-                    'main_inflow_pct': float(r['主力净流入-净占比']) if '主力净流入-净占比' in r else 0
+                    'main_inflow': float(r[inflow_col]) if inflow_col else 0,
+                    'main_inflow_pct': float(r[pct_col]) if pct_col else 0
                 }
         except Exception as e:
             print(f"获取板块资金流向失败: {e}")
@@ -164,10 +168,10 @@ class SectorData:
         except:
             reasons.append("趋势数据获取失败")
 
-        # 3. 综合评分
-        if score >= 80:
+        # 3. 综合评分 (满分55: 资金30 + 趋势25)
+        if score >= 40:
             bucket = 'strong_recommend'
-        elif score >= 60:
+        elif score >= 20:
             bucket = 'watch'
         else:
             bucket = 'hold'

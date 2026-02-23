@@ -102,3 +102,6 @@ FinTech 浅色主题，CSS 变量定义在 app.py 顶部:
 - 字体: Noto Sans SC (中文) + JetBrains Mono (数据)
 - 颜色: 绿(#10b981)=利好, 红(#ef4444)=利空, 蓝(#3b82f6)=主色
 - 板块/个股卡片: section-header-up(绿) / section-header-down(红) 区域标题
+
+## 语言
+- 用中文回答
