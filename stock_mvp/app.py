@@ -516,6 +516,30 @@ custom_css = """
 st.markdown(custom_css, unsafe_allow_html=True)
 
 
+def _lookup_stock(code: str) -> dict:
+    """根据股票代码查询信息（轻量单股接口，~50ms），返回 dict 或 None"""
+    import requests
+    try:
+        market = "1" if code.startswith("6") else "0"
+        url = (
+            f"https://push2.eastmoney.com/api/qt/stock/get"
+            f"?secid={market}.{code}"
+            f"&fields=f57,f58,f43,f170"
+            f"&ut=fa5fd1943c7b386f172d6893dbbd1"
+        )
+        r = requests.get(url, timeout=5)
+        data = r.json().get("data")
+        if data and data.get("f58"):
+            return {
+                'name': data["f58"],
+                'price': data.get("f43", 0) / 100,
+                'change': data.get("f170", 0) / 100,
+            }
+    except Exception as e:
+        print(f"查询股票失败: {e}")
+    return None
+
+
 def main():
     # ========== 顶部标题栏 ==========
     col_title, col_btn = st.columns([4, 1])
@@ -540,8 +564,13 @@ def main():
             api_key = st.text_input("LLM API Key", value=config.LLM_API_KEY, type="password")
 
         with col_s2:
-            schedule_enabled = st.toggle("启用自动执行", value=False, help="每天自动执行收盘分析")
+            auto_refresh = st.toggle("自动刷新", value=False, help="每隔N分钟自动刷新市场数据")
+            refresh_min = st.number_input("刷新间隔(分钟)", min_value=1, max_value=60, value=5, step=1)
+            schedule_enabled = st.toggle("收盘定时分析", value=False, help="每天到指定时间自动执行完整分析")
             schedule_time = st.time_input("执行时间", value=None, help="每日自动执行的时间(16:00为收盘后)")
+            st.session_state['_auto_refresh'] = auto_refresh
+            st.session_state['_refresh_min'] = refresh_min
+            st.session_state['_schedule_enabled'] = schedule_enabled
 
         with col_s3:
             # 定时开启时，AI分析自动绑定并锁定
@@ -579,7 +608,52 @@ def main():
             now = datetime.now()
             if now.time() >= schedule_time:
                 if latest_snapshot is None or latest_snapshot.trade_date != now.strftime('%Y-%m-%d'):
-                    st.info("⏰ 已到达定时时间，请点击上方按钮执行分析")
+                    st.info("⏰ 定时任务触发，正在自动执行分析...")
+                    with st.spinner("自动执行收盘分析中..."):
+                        from pipeline import run_post_close_pipeline
+                        sources = st.session_state.get('enabled_sources')
+                        ai_on = st.session_state.get('ai_analysis_enabled', True)
+                        run_post_close_pipeline(enabled_sources=sources, ai_enabled=ai_on)
+                    st.success("✅ 定时分析完成！")
+                    st.rerun()
+
+    # ========== 自动刷新逻辑 ==========
+    _auto = st.session_state.get('_auto_refresh')
+    _interval = st.session_state.get('_refresh_min', 5)
+
+    if _auto:
+        # 每次页面加载时，检查是否需要刷新市场数据
+        _last_refresh = st.session_state.get('_last_refresh_ts', 0)
+        import time as _time
+        if _time.time() - _last_refresh > _interval * 60:
+            try:
+                from market_data import MarketData
+                from db import MarketSnapshot
+                import json as _json
+                _m = MarketData()
+                _snap = _m.collect_post_close_snapshot()
+                if _snap.get('indices'):
+                    db.upsert_market_snapshot(MarketSnapshot(
+                        trade_date=_snap['trade_date'],
+                        indices_json=_json.dumps(_snap.get('indices', []), ensure_ascii=False),
+                        market_breadth_json=_json.dumps(_snap.get('market_breadth', {}), ensure_ascii=False),
+                        turnover_json=_json.dumps(_snap.get('turnover', {}), ensure_ascii=False),
+                        north_flow_json=_json.dumps(_snap.get('north_flow', {}), ensure_ascii=False),
+                        news_json=_json.dumps(_snap.get('news', []), ensure_ascii=False),
+                        status=_snap.get('status', 'ok'),
+                    ))
+                st.session_state['_last_refresh_ts'] = _time.time()
+            except Exception as e:
+                print(f"自动刷新市场数据失败: {e}")
+
+        # JS 定时刷新页面
+        st.markdown(
+            f'''<script>
+            setTimeout(function(){{ window.location.reload(); }}, {_interval * 60 * 1000});
+            </script>''',
+            unsafe_allow_html=True,
+        )
+        st.caption(f"🔄 自动刷新已开启，每 {_interval} 分钟更新")
 
     # ========== 三大模块 Tab ==========
     tab1, tab2, tab3 = st.tabs(["📊 市场分析", "🎯 板块分析", "💰 个股分析"])
@@ -596,8 +670,6 @@ def main():
 
 def render_market_overview():
     import json
-
-    st.header("📊 市场分析")
 
     # 查询最新市场快照
     snapshot = db.get_latest_market_snapshot()
@@ -899,8 +971,6 @@ def _render_ai_market_analysis(news, indices):
 def render_sector_analysis():
     import json
 
-    st.header("🎯 板块分析")
-
     # ========== 查询数据 ==========
     # 1. AI板块分析数据（上涨/下跌方向）
     ai_sector_analysis = db.get_latest_ai_sector_analysis()
@@ -1065,8 +1135,6 @@ def _render_sector_card(sector, direction="up"):
 def render_quant_signals():
     import json
 
-    st.header("💰 个股分析")
-
     # ========== 查询数据 ==========
     all_signals = db.get_latest_stock_signals(limit=200)
 
@@ -1074,12 +1142,18 @@ def render_quant_signals():
     buy_signals = []
     sell_signals = []
 
+    # 获取自持股票代码，用于筛选下跌信号
+    followed = db.get_all_stocks()
+    followed_codes = {s.stock_code for s in followed}
+
     if all_signals:
         for signal in all_signals:
             if signal.signal in ["strong_buy", "buy"]:
                 buy_signals.append(signal)
             elif signal.signal in ["strong_sell", "sell"]:
-                sell_signals.append(signal)
+                # 只保留自持股票的卖出信号
+                if signal.stock_code in followed_codes:
+                    sell_signals.append(signal)
 
     # ========== 显示数据日期 ==========
     if all_signals:
@@ -1172,7 +1246,7 @@ def render_quant_signals():
 
                     st.markdown("---")
         else:
-            st.info("暂无预估下跌个股")
+            st.info("自持股票中暂无下跌信号" if followed_codes else "请先添加自持个股")
 
     # ========== 我的持仓 ==========
     st.markdown("---")
@@ -1183,36 +1257,58 @@ def render_quant_signals():
     except:
         user_positions = []
 
-    # ===== 添加个股表单 =====
+    # ===== 添加个股 =====
     with st.expander("➕ 添加自持个股", expanded=False):
-        with st.form("add_stock_form", clear_on_submit=True):
-            col_a, col_b, col_c = st.columns(3)
-            with col_a:
-                new_code = st.text_input("股票代码", placeholder="例: 600519")
-                new_name = st.text_input("股票名称", placeholder="例: 贵州茅台")
-            with col_b:
-                new_cost = st.number_input("成本价", min_value=0.0, step=0.01, format="%.2f")
-                new_volume = st.number_input("持仓数量(股)", min_value=0, step=100)
-            with col_c:
-                new_alarm_pct = st.number_input("报警涨跌幅(%)", min_value=0.0, value=3.0, step=0.5, format="%.1f")
-                new_alarm_price = st.number_input("报警价格", min_value=0.0, step=0.01, format="%.2f")
+        # Step 1: 搜索
+        col_search, col_btn = st.columns([3, 1])
+        with col_search:
+            search_code = st.text_input("股票代码", placeholder="例: 600519", key="search_stock_code")
+        with col_btn:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🔍 搜索", use_container_width=True):
+                code = search_code.strip()
+                if code:
+                    with st.spinner("查询中..."):
+                        result = _lookup_stock(code)
+                    if result:
+                        st.session_state['_found_stock'] = {'code': code, **result}
+                    else:
+                        st.session_state.pop('_found_stock', None)
+                        st.warning(f"未找到代码 {code}，请检查是否正确")
 
-            submitted = st.form_submit_button("添加", type="primary", use_container_width=True)
-            if submitted:
-                if new_code and new_name:
+        # Step 2: 显示搜索结果 + 添加表单
+        found = st.session_state.get('_found_stock')
+        if found:
+            chg = found['change']
+            color = "#10b981" if chg >= 0 else "#ef4444"
+            st.markdown(
+                f"**{found['name']}** ({found['code']}) &nbsp; "
+                f"最新价 {found['price']:.2f} &nbsp; "
+                f"<span style='color:{color};'>{'↑' if chg >= 0 else '↓'}{abs(chg):.2f}%</span>",
+                unsafe_allow_html=True,
+            )
+            with st.form("add_stock_form", clear_on_submit=True):
+                col_b, col_c = st.columns(2)
+                with col_b:
+                    new_cost = st.number_input("成本价", min_value=0.0, value=found['price'], step=0.01, format="%.2f")
+                    new_volume = st.number_input("持仓数量(股)", min_value=0, step=100)
+                with col_c:
+                    new_alarm_pct = st.number_input("报警涨跌幅(%)", min_value=0.0, value=3.0, step=0.5, format="%.1f")
+                    new_alarm_price = st.number_input("报警价格", min_value=0.0, step=0.01, format="%.2f")
+
+                if st.form_submit_button("✅ 确认添加", type="primary", use_container_width=True):
                     new_stock = FollowedStock(
-                        stock_code=new_code.strip(),
-                        stock_name=new_name.strip(),
+                        stock_code=found['code'],
+                        stock_name=found['name'],
                         cost_price=new_cost,
                         volume=new_volume,
                         alarm_percent=new_alarm_pct,
                         alarm_price=new_alarm_price,
                     )
                     db.add_stock(new_stock)
-                    st.success(f"已添加 {new_name}({new_code})")
+                    st.session_state.pop('_found_stock', None)
+                    st.success(f"已添加 {found['name']}({found['code']})")
                     st.rerun()
-                else:
-                    st.warning("请填写股票代码和名称")
 
     # ===== 持仓列表 =====
     if user_positions:
