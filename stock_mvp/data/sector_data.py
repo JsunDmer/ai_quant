@@ -3,6 +3,7 @@
 """
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+import time
 import akshare as ak
 import pandas as pd
 
@@ -16,20 +17,67 @@ class SectorData:
         self._db = Database()
 
     def get_sector_list(self) -> List[Dict[str, Any]]:
-        """获取板块列表"""
-        try:
-            df = ak.stock_board_industry_name_em()
-            sectors = []
-            for _, row in df.iterrows():
-                sectors.append({
-                    'name': row['板块名称'],
-                    'change': float(row['涨跌幅']) if pd.notna(row['涨跌幅']) else 0,
-                    'stock_count': int(row['股票数量']) if '股票数量' in row else 0
-                })
+        """获取板块列表（优先同花顺，备选东方财富）"""
+        # 优先尝试同花顺数据源（更稳定）
+        sectors = self._get_sector_list_ths()
+        if sectors:
+            print(f"[SectorData] 使用同花顺数据源，获取 {len(sectors)} 个板块")
             return sectors
-        except Exception as e:
-            print(f"获取板块列表失败: {e}")
-            return []
+
+        # 备选：东方财富数据源
+        print("[SectorData] 同花顺数据源失败，尝试东方财富...")
+        sectors = self._get_sector_list_em()
+        if sectors:
+            print(f"[SectorData] 使用东方财富数据源，获取 {len(sectors)} 个板块")
+            return sectors
+
+        print("[SectorData] 所有数据源都失败，返回空列表")
+        return []
+
+    def _get_sector_list_ths(self) -> List[Dict[str, Any]]:
+        """同花顺数据源获取板块列表"""
+        max_retries = 3
+        retry_delay = 2
+
+        for attempt in range(max_retries):
+            try:
+                df = ak.stock_board_industry_name_ths()
+                sectors = []
+                for _, row in df.iterrows():
+                    sectors.append({
+                        'name': row.get('name', row.get('板块名称', '')),
+                        'code': row.get('code', row.get('板块代码', '')),
+                        'change': 0,  # 同花顺接口暂无涨跌幅
+                        'stock_count': 0
+                    })
+                return sectors
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"  同花顺尝试 {attempt + 1} 失败: {str(e)[:60]}, 重试...")
+                    time.sleep(retry_delay)
+        return []
+
+    def _get_sector_list_em(self) -> List[Dict[str, Any]]:
+        """东方财富数据源获取板块列表"""
+        max_retries = 3
+        retry_delay = 2
+
+        for attempt in range(max_retries):
+            try:
+                df = ak.stock_board_industry_name_em()
+                sectors = []
+                for _, row in df.iterrows():
+                    sectors.append({
+                        'name': row['板块名称'],
+                        'change': float(row['涨跌幅']) if pd.notna(row['涨跌幅']) else 0,
+                        'stock_count': int(row['股票数量']) if '股票数量' in row else 0
+                    })
+                return sectors
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"  东方财富尝试 {attempt + 1} 失败: {str(e)[:60]}, 重试...")
+                    time.sleep(retry_delay)
+        return []
 
     def get_sector_stocks(self, sector_name: str, trade_date: str = None) -> List[Dict[str, Any]]:
         """
@@ -89,21 +137,50 @@ class SectorData:
         return []
 
     def _fetch_sector_stocks_from_api(self, sector_name: str) -> List[Dict[str, Any]]:
-        """从 akshare 拉取板块成分股"""
-        try:
-            df = ak.stock_board_industry_cons_em(symbol=sector_name)
-            stocks = []
-            for _, row in df.head(20).iterrows():
-                stocks.append({
-                    'code': row['代码'],
-                    'name': row['名称'],
-                    'price': float(row['最新价']) if pd.notna(row.get('最新价', 0)) else 0,
-                    'change': float(row['涨跌幅']) if pd.notna(row.get('涨跌幅', 0)) else 0
-                })
+        """从 akshare 拉取板块成分股（优先东方财富，备选历史缓存）"""
+        # 优先尝试东方财富
+        stocks = self._fetch_sector_stocks_em(sector_name)
+        if stocks:
             return stocks
-        except Exception as e:
-            print(f"获取板块成分股失败 ({sector_name}): {e}")
-            return []
+
+        # 备选：使用历史缓存数据（最近一次的数据）
+        print(f"[SectorData] 无法从 API 获取 {sector_name}，尝试使用历史缓存...")
+        cached = self._db.get_sector_stocks(sector_name)
+        if cached:
+            cache_date = cached[0].trade_date if cached else "未知"
+            stocks = [
+                {'code': s.stock_code, 'name': s.stock_name,
+                 'price': s.price, 'change': s.change_pct}
+                for s in cached[:20]
+            ]
+            print(f"[SectorData] 使用历史缓存数据 (date: {cache_date}, count: {len(stocks)})")
+            return stocks
+
+        print(f"[SectorData] 未能获取 {sector_name} 的成分股（无历史缓存）")
+        return []
+
+    def _fetch_sector_stocks_em(self, sector_name: str) -> List[Dict[str, Any]]:
+        """东方财富数据源获取板块成分股"""
+        max_retries = 3
+        retry_delay = 2
+
+        for attempt in range(max_retries):
+            try:
+                df = ak.stock_board_industry_cons_em(symbol=sector_name)
+                stocks = []
+                for _, row in df.head(20).iterrows():
+                    stocks.append({
+                        'code': row['代码'],
+                        'name': row['名称'],
+                        'price': float(row['最新价']) if pd.notna(row.get('最新价', 0)) else 0,
+                        'change': float(row['涨跌幅']) if pd.notna(row.get('涨跌幅', 0)) else 0
+                    })
+                return stocks
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"  获取成分股尝试 {attempt + 1} 失败 ({sector_name}): {str(e)[:60]}, 重试...")
+                    time.sleep(retry_delay)
+        return []
 
     def get_sector_fund_flow(self, sector_name: str) -> Dict[str, Any]:
         """获取板块资金流向"""
