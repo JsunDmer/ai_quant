@@ -175,6 +175,65 @@ class SectorStock:
         if not self.created_at:
             self.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+@dataclass
+class SectorDailyPerformance:
+    """板块每日实际涨跌幅"""
+    trade_date: str = ""
+    sector_name: str = ""
+    change_pct: float = 0.0
+    stock_count: int = 0
+    created_at: str = ""
+    id: int = 0
+
+    def __post_init__(self):
+        if not self.created_at:
+            self.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+@dataclass
+class PredictionEvaluation:
+    """预测评估结果"""
+    prediction_date: str = ""
+    sector_name: str = ""
+    direction: str = ""           # 预测方向 up/down/neutral
+    confidence: int = 0           # 预测置信度 1-10
+    score_up: int = 50
+    score_down: int = 50
+    actual_t1: float = None       # T+1 实际涨跌幅(%), None=待评估
+    actual_t3: float = None       # T+3 累计涨跌幅(%)
+    actual_t5: float = None       # T+5 累计涨跌幅(%)
+    correct_t1: int = None        # 1=正确, 0=错误, None=待评估
+    correct_t3: int = None
+    correct_t5: int = None
+    evaluated_at: str = ""
+    id: int = 0
+
+
+@dataclass
+class SimulatedTrade:
+    """模拟交易记录"""
+    trade_date: str = ""          # 信号日期
+    stock_code: str = ""
+    stock_name: str = ""
+    sector_name: str = ""
+    signal: str = ""              # buy / strong_buy
+    confidence: float = 0.0
+    entry_date: str = ""          # 实际买入日期 (信号次日)
+    entry_price: float = 0.0      # 买入价 (次日开盘价)
+    exit_date: str = ""           # 卖出日期, ""=持仓中
+    exit_price: float = 0.0       # 卖出价
+    exit_reason: str = ""         # stop_loss / take_profit / max_hold
+    return_pct: float = 0.0       # 收益率 %
+    holding_days: int = 0         # 持仓天数
+    status: str = "open"          # open / closed
+    created_at: str = ""
+    id: int = 0
+
+    def __post_init__(self):
+        if not self.created_at:
+            self.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
 class Database:
     """数据库管理"""
     
@@ -371,6 +430,83 @@ class Database:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_sector_stocks_sector
                 ON sector_stocks(sector_name, trade_date)
+            """)
+
+            # 板块每日实际涨跌幅
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sector_daily_performance (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_date TEXT NOT NULL,
+                    sector_name TEXT NOT NULL,
+                    change_pct REAL DEFAULT 0,
+                    stock_count INTEGER DEFAULT 0,
+                    created_at TEXT,
+                    UNIQUE(trade_date, sector_name)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_sdp_date
+                ON sector_daily_performance(trade_date)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_sdp_sector
+                ON sector_daily_performance(sector_name)
+            """)
+
+            # 预测评估结果
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS prediction_evaluations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    prediction_date TEXT NOT NULL,
+                    sector_name TEXT NOT NULL,
+                    direction TEXT,
+                    confidence INTEGER,
+                    score_up INTEGER,
+                    score_down INTEGER,
+                    actual_t1 REAL,
+                    actual_t3 REAL,
+                    actual_t5 REAL,
+                    correct_t1 INTEGER,
+                    correct_t3 INTEGER,
+                    correct_t5 INTEGER,
+                    evaluated_at TEXT,
+                    UNIQUE(prediction_date, sector_name)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_pe_date
+                ON prediction_evaluations(prediction_date)
+            """)
+
+            # 模拟交易表
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS simulated_trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_date TEXT NOT NULL,
+                    stock_code TEXT NOT NULL,
+                    stock_name TEXT,
+                    sector_name TEXT,
+                    signal TEXT,
+                    confidence REAL,
+                    entry_date TEXT,
+                    entry_price REAL,
+                    exit_date TEXT,
+                    exit_price REAL,
+                    exit_reason TEXT,
+                    return_pct REAL,
+                    holding_days INTEGER DEFAULT 0,
+                    status TEXT DEFAULT 'open',
+                    created_at TEXT,
+                    UNIQUE(trade_date, stock_code)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_st_status
+                ON simulated_trades(status)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_st_date
+                ON simulated_trades(trade_date)
             """)
 
             conn.commit()
@@ -686,6 +822,20 @@ class Database:
                 return self.get_ai_news(row['trade_date'])
             return []
 
+    def has_ai_news_for_date(self, trade_date: str) -> bool:
+        """检查指定日期是否已有AI新闻（表示当天已搜索过新闻）"""
+        try:
+            with self.get_connection() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) as count FROM ai_news WHERE trade_date = ?",
+                    (trade_date,)
+                ).fetchone()
+                return row['count'] > 0 if row else False
+        except Exception as e:
+            print(f"[DB] has_ai_news_for_date 查询失败: {e}")
+            # 出错时保守处理，认为无缓存，强制重新搜索
+            return False
+
     # ========== AI板块分析操作 ==========
     
     def upsert_ai_sector_analysis(self, analysis: AISectorAnalysis) -> bool:
@@ -785,6 +935,249 @@ class Database:
                 "SELECT DISTINCT sector_name FROM sector_stocks ORDER BY sector_name"
             ).fetchall()
             return [row['sector_name'] for row in rows]
+
+    # ========== 板块每日涨跌幅操作 ==========
+
+    def upsert_sector_daily_performance(self, perf: SectorDailyPerformance) -> bool:
+        """更新或插入板块每日涨跌幅"""
+        with self.get_connection() as conn:
+            try:
+                conn.execute("""
+                    INSERT OR REPLACE INTO sector_daily_performance
+                    (trade_date, sector_name, change_pct, stock_count, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (perf.trade_date, perf.sector_name, perf.change_pct,
+                      perf.stock_count, perf.created_at))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"保存板块涨跌幅失败: {e}")
+                return False
+
+    def batch_upsert_sector_daily_performance(self, perfs: List[SectorDailyPerformance]) -> bool:
+        """批量更新或插入板块每日涨跌幅"""
+        with self.get_connection() as conn:
+            try:
+                for perf in perfs:
+                    conn.execute("""
+                        INSERT OR REPLACE INTO sector_daily_performance
+                        (trade_date, sector_name, change_pct, stock_count, created_at)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (perf.trade_date, perf.sector_name, perf.change_pct,
+                          perf.stock_count, perf.created_at))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"批量保存板块涨跌幅失败: {e}")
+                return False
+
+    def get_sector_daily_performance(self, trade_date: str) -> List[SectorDailyPerformance]:
+        """获取指定日期的板块涨跌幅"""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM sector_daily_performance WHERE trade_date = ? ORDER BY change_pct DESC",
+                (trade_date,)
+            ).fetchall()
+            return [SectorDailyPerformance(**dict(row)) for row in rows]
+
+    def get_sector_performance_range(self, sector_name: str, start_date: str, end_date: str) -> List[SectorDailyPerformance]:
+        """获取板块在日期范围内的涨跌幅"""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM sector_daily_performance WHERE sector_name = ? AND trade_date >= ? AND trade_date <= ? ORDER BY trade_date",
+                (sector_name, start_date, end_date)
+            ).fetchall()
+            return [SectorDailyPerformance(**dict(row)) for row in rows]
+
+    def get_available_performance_dates(self) -> List[str]:
+        """获取所有有板块涨跌幅数据的交易日（降序）"""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT trade_date FROM sector_daily_performance ORDER BY trade_date DESC"
+            ).fetchall()
+            return [row['trade_date'] for row in rows]
+
+    def get_next_n_trading_dates(self, from_date: str, n: int) -> List[str]:
+        """获取 from_date 之后的 N 个交易日（通过 sector_daily_performance 表推断）"""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT trade_date FROM sector_daily_performance WHERE trade_date > ? ORDER BY trade_date LIMIT ?",
+                (from_date, n)
+            ).fetchall()
+            return [row['trade_date'] for row in rows]
+
+    # ========== 预测评估操作 ==========
+
+    def upsert_prediction_evaluation(self, ev: PredictionEvaluation) -> bool:
+        """更新或插入预测评估"""
+        with self.get_connection() as conn:
+            try:
+                conn.execute("""
+                    INSERT OR REPLACE INTO prediction_evaluations
+                    (prediction_date, sector_name, direction, confidence, score_up, score_down,
+                     actual_t1, actual_t3, actual_t5, correct_t1, correct_t3, correct_t5, evaluated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (ev.prediction_date, ev.sector_name, ev.direction, ev.confidence,
+                      ev.score_up, ev.score_down, ev.actual_t1, ev.actual_t3, ev.actual_t5,
+                      ev.correct_t1, ev.correct_t3, ev.correct_t5, ev.evaluated_at))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"保存预测评估失败: {e}")
+                return False
+
+    def batch_upsert_prediction_evaluations(self, evs: List[PredictionEvaluation]) -> bool:
+        """批量更新或插入预测评估"""
+        with self.get_connection() as conn:
+            try:
+                for ev in evs:
+                    conn.execute("""
+                        INSERT OR REPLACE INTO prediction_evaluations
+                        (prediction_date, sector_name, direction, confidence, score_up, score_down,
+                         actual_t1, actual_t3, actual_t5, correct_t1, correct_t3, correct_t5, evaluated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (ev.prediction_date, ev.sector_name, ev.direction, ev.confidence,
+                          ev.score_up, ev.score_down, ev.actual_t1, ev.actual_t3, ev.actual_t5,
+                          ev.correct_t1, ev.correct_t3, ev.correct_t5, ev.evaluated_at))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"批量保存预测评估失败: {e}")
+                return False
+
+    def get_prediction_evaluations(self, prediction_date: str) -> List[PredictionEvaluation]:
+        """获取指定日期的预测评估"""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM prediction_evaluations WHERE prediction_date = ? ORDER BY confidence DESC",
+                (prediction_date,)
+            ).fetchall()
+            return [PredictionEvaluation(**dict(row)) for row in rows]
+
+    def get_prediction_evaluations_range(self, start_date: str, end_date: str) -> List[PredictionEvaluation]:
+        """获取日期范围内的预测评估"""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM prediction_evaluations WHERE prediction_date >= ? AND prediction_date <= ? ORDER BY prediction_date DESC, confidence DESC",
+                (start_date, end_date)
+            ).fetchall()
+            return [PredictionEvaluation(**dict(row)) for row in rows]
+
+    def get_all_prediction_dates(self) -> List[str]:
+        """获取所有有预测的日期"""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT prediction_date FROM prediction_evaluations ORDER BY prediction_date DESC"
+            ).fetchall()
+            return [row['prediction_date'] for row in rows]
+
+    # ========== 模拟交易操作 ==========
+
+    def upsert_simulated_trade(self, trade: SimulatedTrade) -> bool:
+        """更新或插入模拟交易"""
+        with self.get_connection() as conn:
+            try:
+                conn.execute("""
+                    INSERT OR REPLACE INTO simulated_trades
+                    (trade_date, stock_code, stock_name, sector_name, signal, confidence,
+                     entry_date, entry_price, exit_date, exit_price, exit_reason,
+                     return_pct, holding_days, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (trade.trade_date, trade.stock_code, trade.stock_name, trade.sector_name,
+                      trade.signal, trade.confidence, trade.entry_date, trade.entry_price,
+                      trade.exit_date, trade.exit_price, trade.exit_reason,
+                      trade.return_pct, trade.holding_days, trade.status, trade.created_at))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"保存模拟交易失败: {e}")
+                return False
+
+    def batch_upsert_simulated_trades(self, trades: List[SimulatedTrade]) -> bool:
+        """批量更新或插入模拟交易"""
+        with self.get_connection() as conn:
+            try:
+                for trade in trades:
+                    conn.execute("""
+                        INSERT OR REPLACE INTO simulated_trades
+                        (trade_date, stock_code, stock_name, sector_name, signal, confidence,
+                         entry_date, entry_price, exit_date, exit_price, exit_reason,
+                         return_pct, holding_days, status, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (trade.trade_date, trade.stock_code, trade.stock_name, trade.sector_name,
+                          trade.signal, trade.confidence, trade.entry_date, trade.entry_price,
+                          trade.exit_date, trade.exit_price, trade.exit_reason,
+                          trade.return_pct, trade.holding_days, trade.status, trade.created_at))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"批量保存模拟交易失败: {e}")
+                return False
+
+    def get_open_trades(self) -> List[SimulatedTrade]:
+        """获取所有持仓中的交易"""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM simulated_trades WHERE status = 'open' ORDER BY entry_date DESC"
+            ).fetchall()
+            return [SimulatedTrade(**dict(row)) for row in rows]
+
+    def get_all_trades(self, start_date: str = None, end_date: str = None) -> List[SimulatedTrade]:
+        """获取所有交易记录"""
+        with self.get_connection() as conn:
+            if start_date and end_date:
+                rows = conn.execute(
+                    "SELECT * FROM simulated_trades WHERE trade_date >= ? AND trade_date <= ? ORDER BY trade_date DESC",
+                    (start_date, end_date)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM simulated_trades ORDER BY trade_date DESC"
+                ).fetchall()
+            return [SimulatedTrade(**dict(row)) for row in rows]
+
+    def get_trades_by_status(self, status: str) -> List[SimulatedTrade]:
+        """按状态获取交易"""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM simulated_trades WHERE status = ? ORDER BY trade_date DESC",
+                (status,)
+            ).fetchall()
+            return [SimulatedTrade(**dict(row)) for row in rows]
+
+    def get_trade_by_stock(self, trade_date: str, stock_code: str) -> Optional[SimulatedTrade]:
+        """获取指定日期和股票的模拟交易"""
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM simulated_trades WHERE trade_date = ? AND stock_code = ?",
+                (trade_date, stock_code)
+            ).fetchone()
+            return SimulatedTrade(**dict(row)) if row else None
+
+    def get_distinct_trade_dates(self) -> List[str]:
+        """获取所有信号日期(降序)"""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT trade_date FROM simulated_trades ORDER BY trade_date DESC"
+            ).fetchall()
+            return [row['trade_date'] for row in rows]
+
+    def close_trade(self, trade_id: int, exit_date: str, exit_price: float,
+                    exit_reason: str, return_pct: float, holding_days: int) -> bool:
+        """平仓交易"""
+        with self.get_connection() as conn:
+            try:
+                conn.execute("""
+                    UPDATE simulated_trades
+                    SET exit_date = ?, exit_price = ?, exit_reason = ?,
+                        return_pct = ?, holding_days = ?, status = 'closed'
+                    WHERE id = ?
+                """, (exit_date, exit_price, exit_reason, return_pct, holding_days, trade_id))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"平仓交易失败: {e}")
+                return False
 
 
 # 全局数据库实例

@@ -5,7 +5,7 @@ Stock MVP - 股民投资助手
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from config import config
 from db import db, FollowedStock
@@ -571,12 +571,26 @@ def main():
     with col_title:
         st.markdown("### 📈 股民投资助手")
     with col_btn:
-        if st.button("🚀 执行分析", type="primary", use_container_width=True):
+        if st.button("🚀 执行分析", type="primary", width="stretch"):
             with st.spinner("正在分析市场数据..."):
-                from pipeline import run_post_close_pipeline
+                from pipeline import run_post_close_pipeline, get_trading_date
+
                 sources = st.session_state.get('enabled_sources')
                 ai_on = st.session_state.get('ai_analysis_enabled', True)
-                run_post_close_pipeline(enabled_sources=sources, ai_enabled=ai_on)
+
+                # 使用实际交易日期（处理周末自动回退）
+                trade_date, _ = get_trading_date()
+
+                # 检查该交易日期是否已有新闻分析（已搜索过）
+                has_news = db.has_ai_news_for_date(trade_date)
+
+                # 如果当天已有新闻分析，则只更新实时数据
+                refresh_realtime_only = has_news
+
+                if refresh_realtime_only:
+                    st.info("✓ 当天已搜索过新闻，现在仅更新实时市场数据...")
+
+                run_post_close_pipeline(enabled_sources=sources, ai_enabled=ai_on, refresh_realtime_only=refresh_realtime_only)
             st.success("分析完成！")
             st.rerun()
 
@@ -635,10 +649,24 @@ def main():
                 if latest_snapshot is None or latest_snapshot.trade_date != now.strftime('%Y-%m-%d'):
                     st.info("⏰ 定时任务触发，正在自动执行分析...")
                     with st.spinner("自动执行收盘分析中..."):
-                        from pipeline import run_post_close_pipeline
+                        from pipeline import run_post_close_pipeline, get_trading_date
+
                         sources = st.session_state.get('enabled_sources')
                         ai_on = st.session_state.get('ai_analysis_enabled', True)
-                        run_post_close_pipeline(enabled_sources=sources, ai_enabled=ai_on)
+
+                        # 使用实际交易日期（处理周末自动回退）
+                        trade_date, _ = get_trading_date()
+
+                        # 检查该交易日期是否已有新闻分析
+                        has_news = db.has_ai_news_for_date(trade_date)
+
+                        # 如果当天已有新闻分析，则只更新实时数据
+                        refresh_realtime_only = has_news
+
+                        if refresh_realtime_only:
+                            st.info("📈 当天已搜索过新闻，仅更新实时数据...")
+
+                        run_post_close_pipeline(enabled_sources=sources, ai_enabled=ai_on, refresh_realtime_only=refresh_realtime_only)
                     st.success("✅ 定时分析完成！")
                     st.rerun()
 
@@ -680,8 +708,11 @@ def main():
         )
         st.caption(f"🔄 自动刷新已开启，每 {_interval} 分钟更新")
 
-    # ========== 三大模块 Tab ==========
-    tab1, tab2, tab3 = st.tabs(["📊 市场分析", "🎯 板块分析", "💰 个股分析"])
+    # ========== 五大模块 Tab ==========
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 市场分析", "🎯 板块分析", "💰 个股分析",
+        "📋 评估报告", "📈 量化策略评估"
+    ])
 
     with tab1:
         render_market_overview()
@@ -691,6 +722,12 @@ def main():
 
     with tab3:
         render_quant_signals()
+
+    with tab4:
+        render_evaluation_report()
+
+    with tab5:
+        render_trade_evaluation()
 
 
 def render_market_overview():
@@ -923,38 +960,27 @@ padding:8px 12px;font-size:13px;font-weight:500;line-height:1.4;">{title}</div>'
 
 
 def _render_indices_section(indices, market_breadth, turnover, north_flow):
-    st.subheader("📈 市场指数")
-    index_map = {
-        "上证指数": "shanghai",
-        "深证成指": "shenzhen",
-        "创业板指": "chinext",
-        "科创50": "sci_tech",
-        "沪深300": "hs300",
-        "中证500": "cci500",
-        "中证1000": "cci1000"
-    }
-    cols = st.columns(7)
-    for idx, (name, key) in enumerate(index_map.items()):
-        with cols[idx]:
-            if key in indices:
-                data = indices[key]
-                price = data.get("price", "N/A")
-                change = data.get("change_pct", 0)
-                change_str = f"+{change:.2f}%" if change >= 0 else f"{change:.2f}%"
-                st.metric(label=name, value=f"{price:.2f}" if isinstance(price, (int, float)) else str(price), delta=change_str)
-            else:
-                st.metric(label=name, value="暂无")
-    
+    st.subheader("📈 市场概览")
+
     # 市场广度摘要
     if market_breadth:
-        st.markdown("**市场广度**")
+        col1, col2, col3 = st.columns(3)
         up = market_breadth.get("上涨", market_breadth.get("up", 0))
         down = market_breadth.get("下跌", market_breadth.get("down", 0))
-        total = up + down if isinstance(up, int) and isinstance(down, int) else 0
-        if total > 0:
-            ratio = up / total * 100
-            st.metric("涨跌比", f"{ratio:.1f}%", f"上涨 {up} / 下跌 {down}")
-    
+        flat = market_breadth.get("平盘", market_breadth.get("flat", 0))
+        total = up + down + flat if isinstance(up, int) and isinstance(down, int) else 0
+
+        with col1:
+            st.metric("上涨", f"{up}")
+        with col2:
+            st.metric("下跌", f"{down}")
+        with col3:
+            if total > 0:
+                ratio = up / total * 100
+                st.metric("涨跌比", f"{ratio:.1f}%")
+            else:
+                st.metric("涨跌比", "N/A")
+
     # 北向资金
     if north_flow:
         net = north_flow.get("net", north_flow.get("净买入", 0))
@@ -1164,8 +1190,8 @@ def render_quant_signals():
         st.markdown('<div class="section-header-up"><h3>📈 预估上涨个股</h3></div>', unsafe_allow_html=True)
 
         if buy_signals:
-            # 按置信度排序
-            buy_signals.sort(key=lambda x: x.confidence, reverse=True)
+            # 按更新时间排序（最新的在前），再按置信度排序
+            buy_signals.sort(key=lambda x: (x.created_at, x.confidence), reverse=True)
 
             for signal in buy_signals[:10]:
                 # 解析因子
@@ -1182,12 +1208,14 @@ def render_quant_signals():
                 confidence_pct = signal.confidence * 100
 
                 with st.container():
-                    col_name, col_conf = st.columns([3, 1])
+                    col_name, col_conf, col_time = st.columns([2, 1, 1])
                     with col_name:
                         st.markdown(f"**{signal.stock_name}** ({signal.stock_code})")
                         st.caption(f"板块: {signal.sector_name} | 信号: {signal_display}")
                     with col_conf:
                         st.metric("置信度", f"{confidence_pct:.0f}%")
+                    with col_time:
+                        st.metric("更新", signal.created_at.split(" ")[0] if signal.created_at else "-")
 
                     # 显示原因
                     if factors:
@@ -1207,8 +1235,8 @@ def render_quant_signals():
         st.markdown('<div class="section-header-down"><h3>📉 预估下跌个股</h3></div>', unsafe_allow_html=True)
 
         if sell_signals:
-            # 按置信度排序
-            sell_signals.sort(key=lambda x: x.confidence, reverse=True)
+            # 按更新时间排序（最新的在前），再按置信度排序
+            sell_signals.sort(key=lambda x: (x.created_at, x.confidence), reverse=True)
 
             for signal in sell_signals[:10]:
                 factors = []
@@ -1224,12 +1252,14 @@ def render_quant_signals():
                 confidence_pct = signal.confidence * 100
 
                 with st.container():
-                    col_name, col_conf = st.columns([3, 1])
+                    col_name, col_conf, col_time = st.columns([2, 1, 1])
                     with col_name:
                         st.markdown(f"**{signal.stock_name}** ({signal.stock_code})")
                         st.caption(f"板块: {signal.sector_name} | 信号: {signal_display}")
                     with col_conf:
                         st.metric("置信度", f"{confidence_pct:.0f}%")
+                    with col_time:
+                        st.metric("更新", signal.created_at.split(" ")[0] if signal.created_at else "-")
 
                     if factors:
                         if isinstance(factors, list) and factors:
@@ -1260,7 +1290,7 @@ def render_quant_signals():
             search_kw = st.text_input("搜索股票", placeholder="输入名称、代码或拼音，如: 茅台 / 600519 / mt", key="search_stock_kw")
         with col_btn:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🔍 搜索", use_container_width=True):
+            if st.button("🔍 搜索", width="stretch"):
                 kw = search_kw.strip()
                 if kw:
                     with st.spinner("搜索中..."):
@@ -1279,7 +1309,7 @@ def render_quant_signals():
             cols = st.columns(min(len(search_results), 4))
             for i, item in enumerate(search_results[:8]):
                 with cols[i % 4]:
-                    if st.button(f"{item['name']}\n{item['code']}", key=f"pick_{item['code']}", use_container_width=True):
+                    if st.button(f"{item['name']}\n{item['code']}", key=f"pick_{item['code']}", width="stretch"):
                         with st.spinner("查询行情..."):
                             detail = _lookup_stock(item['code'])
                         if detail:
@@ -1308,7 +1338,7 @@ def render_quant_signals():
                     new_alarm_pct = st.number_input("报警涨跌幅(%)", min_value=0.0, value=3.0, step=0.5, format="%.1f")
                     new_alarm_price = st.number_input("报警价格", min_value=0.0, step=0.01, format="%.2f")
 
-                if st.form_submit_button("✅ 确认添加", type="primary", use_container_width=True):
+                if st.form_submit_button("✅ 确认添加", type="primary", width="stretch"):
                     new_stock = FollowedStock(
                         stock_code=found['code'],
                         stock_name=found['name'],
@@ -1358,7 +1388,7 @@ def render_quant_signals():
 
                     col_save, col_cancel = st.columns(2)
                     with col_save:
-                        if st.form_submit_button("💾 保存", type="primary", use_container_width=True):
+                        if st.form_submit_button("💾 保存", type="primary", width="stretch"):
                             updated = FollowedStock(
                                 stock_code=pos.stock_code,
                                 stock_name=pos.stock_name,
@@ -1372,11 +1402,492 @@ def render_quant_signals():
                             st.success(f"已更新 {pos.stock_name}")
                             st.rerun()
                     with col_cancel:
-                        if st.form_submit_button("取消", use_container_width=True):
+                        if st.form_submit_button("取消", width="stretch"):
                             st.session_state[edit_key] = False
                             st.rerun()
     else:
         st.info("暂无持仓，点击上方「添加自持个股」添加")
+
+
+def render_evaluation_report():
+    """渲染评估报告 Tab"""
+    from evaluation.sector_evaluator import sector_evaluator
+
+    # 日期范围选择 + 刷新按钮
+    col_range, col_refresh = st.columns([4, 1])
+    with col_range:
+        range_option = st.selectbox(
+            "日期范围",
+            ["最近7天", "最近30天", "最近60天", "全部"],
+            index=1,
+            key="eval_range",
+        )
+    with col_refresh:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔄 刷新评估", width="stretch"):
+            with st.spinner("正在评估历史预测..."):
+                count = sector_evaluator.evaluate_all_pending()
+            st.success(f"评估完成，更新了 {count} 条记录")
+            st.rerun()
+
+    # 计算日期范围
+    today = datetime.now()
+    range_days = {"最近7天": 7, "最近30天": 30, "最近60天": 60, "全部": None}
+    days = range_days.get(range_option)
+    start_date = (today - timedelta(days=days)).strftime("%Y-%m-%d") if days else None
+    end_date = today.strftime("%Y-%m-%d") if days else None
+
+    # 获取总体准确率
+    summary = sector_evaluator.get_accuracy_summary(start_date, end_date)
+
+    if all(summary[k]["total"] == 0 for k in ["t1", "t3", "t5"]):
+        st.info("暂无评估数据，请先运行几天 Pipeline 积累数据后再查看")
+        return
+
+    # ========== 总体准确率 ==========
+    st.markdown("---")
+    col_t1, col_t3, col_t5 = st.columns(3)
+    for col, key, label in [
+        (col_t1, "t1", "T+1 准确率"),
+        (col_t3, "t3", "T+3 准确率"),
+        (col_t5, "t5", "T+5 准确率"),
+    ]:
+        with col:
+            s = summary[key]
+            st.metric(
+                label=label,
+                value=f"{s['accuracy']:.1f}%",
+                delta=f"{s['correct']}/{s['total']}" if s['total'] > 0 else "无数据",
+            )
+            if s["pending"] > 0:
+                st.caption(f"待评估: {s['pending']}")
+
+    # ========== 准确率趋势 ==========
+    st.markdown("---")
+    st.subheader("📈 准确率趋势")
+    trend_days = days if days else 60
+    trend = sector_evaluator.get_daily_accuracy_trend(trend_days)
+
+    if trend:
+        dates = [t["date"] for t in trend]
+        fig = go.Figure()
+        for key, name, color in [
+            ("t1_accuracy", "T+1", "#3b82f6"),
+            ("t3_accuracy", "T+3", "#10b981"),
+            ("t5_accuracy", "T+5", "#f59e0b"),
+        ]:
+            values = [t.get(key) for t in trend]
+            fig.add_trace(go.Scatter(
+                x=dates, y=values,
+                mode="lines+markers",
+                name=name,
+                line=dict(color=color, width=2),
+                marker=dict(size=5),
+                connectgaps=True,
+            ))
+        fig.update_layout(
+            yaxis_title="准确率 (%)",
+            xaxis_title="预测日期",
+            height=350,
+            margin=dict(l=40, r=20, t=20, b=40),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+        )
+        fig.update_yaxes(range=[0, 100], gridcolor="rgba(0,0,0,0.05)")
+        fig.update_xaxes(gridcolor="rgba(0,0,0,0.05)")
+        st.plotly_chart(fig, width="stretch")
+    else:
+        st.info("暂无趋势数据")
+
+    # ========== 按置信度 / 按方向 分组 ==========
+    st.markdown("---")
+    col_conf, col_dir = st.columns(2)
+
+    with col_conf:
+        st.subheader("📊 按置信度分组")
+        conf_data = sector_evaluator.get_accuracy_by_confidence(start_date, end_date)
+        if conf_data:
+            groups = [d["group"] for d in conf_data]
+            fig_conf = go.Figure()
+            for key, name, color in [
+                ("t1_accuracy", "T+1", "#3b82f6"),
+                ("t3_accuracy", "T+3", "#10b981"),
+                ("t5_accuracy", "T+5", "#f59e0b"),
+            ]:
+                fig_conf.add_trace(go.Bar(
+                    x=groups,
+                    y=[d[key] for d in conf_data],
+                    name=name,
+                    marker_color=color,
+                    text=[f"{d[key]:.0f}%" for d in conf_data],
+                    textposition="auto",
+                ))
+            fig_conf.update_layout(
+                barmode="group",
+                yaxis_title="准确率 (%)",
+                height=300,
+                margin=dict(l=40, r=20, t=20, b=40),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+            )
+            fig_conf.update_yaxes(range=[0, 100], gridcolor="rgba(0,0,0,0.05)")
+            st.plotly_chart(fig_conf, width="stretch")
+            for d in conf_data:
+                st.caption(f"{d['group']}: {d['count']} 条预测")
+        else:
+            st.info("暂无数据")
+
+    with col_dir:
+        st.subheader("📊 按预测方向分组")
+        dir_data = sector_evaluator.get_accuracy_by_direction(start_date, end_date)
+        dir_labels = {"up": "上涨", "down": "下跌", "neutral": "中性"}
+        if dir_data:
+            directions = []
+            for d in ["up", "down", "neutral"]:
+                if d in dir_data and dir_data[d]["count"] > 0:
+                    directions.append(d)
+            if directions:
+                labels = [dir_labels.get(d, d) for d in directions]
+                fig_dir = go.Figure()
+                for key, name, color in [
+                    ("t1_accuracy", "T+1", "#3b82f6"),
+                    ("t3_accuracy", "T+3", "#10b981"),
+                    ("t5_accuracy", "T+5", "#f59e0b"),
+                ]:
+                    fig_dir.add_trace(go.Bar(
+                        x=labels,
+                        y=[dir_data[d][key] for d in directions],
+                        name=name,
+                        marker_color=color,
+                        text=[f"{dir_data[d][key]:.0f}%" for d in directions],
+                        textposition="auto",
+                    ))
+                fig_dir.update_layout(
+                    barmode="group",
+                    yaxis_title="准确率 (%)",
+                    height=300,
+                    margin=dict(l=40, r=20, t=20, b=40),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                )
+                fig_dir.update_yaxes(range=[0, 100], gridcolor="rgba(0,0,0,0.05)")
+                st.plotly_chart(fig_dir, width="stretch")
+                for d in directions:
+                    st.caption(f"{dir_labels.get(d, d)}: {dir_data[d]['count']} 条预测")
+            else:
+                st.info("暂无数据")
+        else:
+            st.info("暂无数据")
+
+    # ========== 预测明细 ==========
+    st.markdown("---")
+    with st.expander("📝 预测明细", expanded=False):
+        details = sector_evaluator.get_evaluation_details(limit=200)
+        if details:
+            rows = []
+            for ev in details:
+                def _fmt_correct(c, actual):
+                    if c is None:
+                        return "⏳"
+                    return f"✅ ({actual:+.2f}%)" if c == 1 else f"❌ ({actual:+.2f}%)"
+
+                dir_label = {"up": "上涨", "down": "下跌", "neutral": "中性"}.get(ev.direction, ev.direction)
+                rows.append({
+                    "日期": ev.prediction_date,
+                    "板块": ev.sector_name,
+                    "预测方向": dir_label,
+                    "置信度": ev.confidence,
+                    "T+1": _fmt_correct(ev.correct_t1, ev.actual_t1 or 0),
+                    "T+3": _fmt_correct(ev.correct_t3, ev.actual_t3 or 0),
+                    "T+5": _fmt_correct(ev.correct_t5, ev.actual_t5 or 0),
+                })
+            df = pd.DataFrame(rows)
+            st.dataframe(df, width="stretch", height=400)
+        else:
+            st.info("暂无明细数据")
+
+
+def _render_open_positions(simulator):
+    """渲染当前持仓列表"""
+    from db import Database
+    _db = Database()
+    open_trades = _db.get_open_trades()
+
+    st.subheader("📦 当前持仓")
+    if not open_trades:
+        st.info("暂无持仓")
+        return
+
+    rows = []
+    for t in open_trades:
+        try:
+            entry_dt = datetime.strptime(t.entry_date, "%Y-%m-%d")
+            hold_days = (datetime.now() - entry_dt).days
+        except:
+            hold_days = 0
+
+        signal_label = "强买" if t.signal == "strong_buy" else "买入"
+        rows.append({
+            "股票": f"{t.stock_name}({t.stock_code})",
+            "板块": t.sector_name,
+            "信号": signal_label,
+            "置信度": f"{t.confidence:.0%}",
+            "买入日期": t.entry_date,
+            "买入价": f"{t.entry_price:.2f}",
+            "持仓天数": hold_days,
+        })
+
+    df = pd.DataFrame(rows)
+    st.dataframe(df, width="stretch", hide_index=True)
+
+
+def _render_recent_trades(simulator):
+    """渲染最近交易操作记录"""
+    from db import Database
+    _db = Database()
+    closed_trades = _db.get_trades_by_status("closed")
+
+    st.markdown("---")
+    st.subheader("📋 最近交易操作")
+
+    if not closed_trades:
+        st.info("暂无已完成的交易")
+        return
+
+    recent = sorted(closed_trades, key=lambda t: t.exit_date or "", reverse=True)[:20]
+
+    exit_reason_map = {
+        "stop_loss": "止损",
+        "take_profit": "止盈",
+        "max_hold": "到期",
+    }
+
+    rows = []
+    for t in recent:
+        reason_label = exit_reason_map.get(t.exit_reason, t.exit_reason or "–")
+        signal_label = "强买" if t.signal == "strong_buy" else "买入"
+        rows.append({
+            "平仓日期": t.exit_date,
+            "股票": f"{t.stock_name}({t.stock_code})",
+            "板块": t.sector_name,
+            "信号": signal_label,
+            "买入价": f"{t.entry_price:.2f}",
+            "卖出价": f"{t.exit_price:.2f}",
+            "收益": f"{t.return_pct:+.2f}%",
+            "持仓天数": t.holding_days,
+            "平仓原因": reason_label,
+        })
+
+    df = pd.DataFrame(rows)
+    st.dataframe(df, width="stretch", hide_index=True)
+
+
+def render_trade_evaluation():
+    """渲染量化策略评估 Tab"""
+    from evaluation.trade_simulator import trade_simulator
+
+    # ========== 顶部: 日期范围 + 刷新按钮 ==========
+    col_range, col_refresh = st.columns([4, 1])
+    with col_range:
+        range_option = st.selectbox(
+            "日期范围",
+            ["最近7天", "最近30天", "最近60天", "全部"],
+            index=1,
+            key="trade_eval_range",
+        )
+    with col_refresh:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔄 刷新模拟", width="stretch"):
+            with st.spinner("正在执行模拟交易..."):
+                result = trade_simulator.run_full_simulation()
+            st.success(f"完成: 新建 {result['created']} 笔, 平仓 {result['closed']} 笔")
+            st.rerun()
+
+    # 计算日期范围
+    today = datetime.now()
+    range_days = {"最近7天": 7, "最近30天": 30, "最近60天": 60, "全部": None}
+    days = range_days.get(range_option)
+    start_date = (today - timedelta(days=days)).strftime("%Y-%m-%d") if days else None
+    end_date = today.strftime("%Y-%m-%d") if days else None
+
+    # 获取统计数据
+    summary = trade_simulator.get_summary(start_date, end_date)
+
+    if summary["total_trades"] == 0:
+        st.info("暂无模拟交易数据，请先运行 Pipeline 生成买入信号后点击刷新")
+        return
+
+    # ========== 6列 st.metric ==========
+    st.markdown("---")
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    with c1:
+        st.metric("总交易", f"{summary['total_trades']}")
+    with c2:
+        wr = summary['win_rate']
+        st.metric("胜率", f"{wr:.1f}%")
+    with c3:
+        avg_r = summary['avg_return']
+        st.metric("平均收益", f"{avg_r:+.2f}%")
+    with c4:
+        total_r = summary['total_return']
+        st.metric("总收益", f"{total_r:+.1f}%")
+    with c5:
+        pf = summary['profit_factor']
+        pf_str = f"{pf:.2f}" if pf != float('inf') else "∞"
+        st.metric("盈亏比", pf_str)
+    with c6:
+        st.metric("持仓中", f"{summary['open_trades']}")
+
+    # ========== 当前持仓 ==========
+    st.markdown("---")
+    _render_open_positions(trade_simulator)
+
+    # ========== 最近交易操作 ==========
+    _render_recent_trades(trade_simulator)
+
+    # ========== 累计收益曲线 ==========
+    st.markdown("---")
+    st.subheader("📈 累计收益曲线")
+    pnl_data = trade_simulator.get_daily_pnl(days=days or 60)
+
+    if pnl_data:
+        dates = [d["date"] for d in pnl_data]
+        cum_returns = [d["cumulative_return"] for d in pnl_data]
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=dates, y=cum_returns,
+            mode="lines",
+            fill="tozeroy",
+            line=dict(color="#3b82f6", width=2),
+            fillcolor="rgba(59, 130, 246, 0.1)",
+            name="累计收益",
+        ))
+        fig.update_layout(
+            yaxis_title="累计收益率 (%)",
+            xaxis_title="日期",
+            height=350,
+            margin=dict(l=40, r=20, t=20, b=40),
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+        )
+        fig.update_yaxes(gridcolor="rgba(0,0,0,0.05)", zeroline=True, zerolinecolor="rgba(0,0,0,0.1)")
+        fig.update_xaxes(gridcolor="rgba(0,0,0,0.05)")
+        st.plotly_chart(fig, width="stretch")
+    else:
+        st.info("暂无收益曲线数据（需要有已平仓交易）")
+
+    # ========== 按板块 / 按置信度 分组 ==========
+    st.markdown("---")
+    col_sector, col_conf = st.columns(2)
+
+    with col_sector:
+        st.subheader("📊 按板块分组")
+        sector_data = trade_simulator.get_performance_by_sector(start_date, end_date)
+        if sector_data:
+            sectors = [d["sector"] for d in sector_data[:10]]
+            fig_s = go.Figure()
+            fig_s.add_trace(go.Bar(
+                x=sectors,
+                y=[d["win_rate"] for d in sector_data[:10]],
+                name="胜率",
+                marker_color="#3b82f6",
+                text=[f"{d['win_rate']:.0f}%" for d in sector_data[:10]],
+                textposition="auto",
+            ))
+            fig_s.add_trace(go.Bar(
+                x=sectors,
+                y=[d["avg_return"] for d in sector_data[:10]],
+                name="平均收益",
+                marker_color="#10b981",
+                text=[f"{d['avg_return']:+.1f}%" for d in sector_data[:10]],
+                textposition="auto",
+            ))
+            fig_s.update_layout(
+                barmode="group",
+                height=300,
+                margin=dict(l=40, r=20, t=20, b=40),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+            )
+            fig_s.update_yaxes(gridcolor="rgba(0,0,0,0.05)")
+            st.plotly_chart(fig_s, width="stretch")
+            for d in sector_data[:10]:
+                st.caption(f"{d['sector']}: {d['count']} 笔")
+        else:
+            st.info("暂无数据")
+
+    with col_conf:
+        st.subheader("📊 按置信度分组")
+        conf_data = trade_simulator.get_performance_by_confidence(start_date, end_date)
+        if conf_data and any(d["count"] > 0 for d in conf_data):
+            groups = [d["group"] for d in conf_data]
+            fig_c = go.Figure()
+            fig_c.add_trace(go.Bar(
+                x=groups,
+                y=[d["win_rate"] for d in conf_data],
+                name="胜率",
+                marker_color="#3b82f6",
+                text=[f"{d['win_rate']:.0f}%" for d in conf_data],
+                textposition="auto",
+            ))
+            fig_c.add_trace(go.Bar(
+                x=groups,
+                y=[d["avg_return"] for d in conf_data],
+                name="平均收益",
+                marker_color="#10b981",
+                text=[f"{d['avg_return']:+.1f}%" for d in conf_data],
+                textposition="auto",
+            ))
+            fig_c.update_layout(
+                barmode="group",
+                height=300,
+                margin=dict(l=40, r=20, t=20, b=40),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+            )
+            fig_c.update_yaxes(gridcolor="rgba(0,0,0,0.05)")
+            st.plotly_chart(fig_c, width="stretch")
+            for d in conf_data:
+                st.caption(f"{d['group']}: {d['count']} 笔")
+        else:
+            st.info("暂无数据")
+
+    # ========== 交易明细 ==========
+    st.markdown("---")
+    with st.expander("📝 交易明细", expanded=False):
+        details = trade_simulator.get_trade_details(limit=200)
+        if details:
+            rows = []
+            for t in details:
+                exit_reason_map = {
+                    "stop_loss": "止损",
+                    "take_profit": "止盈",
+                    "max_hold": "到期",
+                }
+                status_label = "持仓中" if t.status == "open" else "已平仓"
+                rows.append({
+                    "信号日期": t.trade_date,
+                    "股票": f"{t.stock_name}({t.stock_code})",
+                    "板块": t.sector_name,
+                    "信号": "强买" if t.signal == "strong_buy" else "买入",
+                    "置信度": f"{t.confidence:.2f}",
+                    "买入价": f"{t.entry_price:.2f}" if t.entry_price else "-",
+                    "卖出价": f"{t.exit_price:.2f}" if t.exit_price else "-",
+                    "收益": f"{t.return_pct:+.2f}%" if t.status == "closed" else "-",
+                    "持仓天数": str(t.holding_days) if t.status == "closed" else "-",
+                    "平仓原因": exit_reason_map.get(t.exit_reason, t.exit_reason) if t.exit_reason else "-",
+                    "状态": status_label,
+                })
+            df = pd.DataFrame(rows)
+            st.dataframe(df, width="stretch", height=400)
+        else:
+            st.info("暂无交易明细")
 
 
 if __name__ == "__main__":

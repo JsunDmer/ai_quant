@@ -23,7 +23,7 @@ from data.market_data import MarketData
 from data.sector_data import SectorData
 from strategy.quant_strategy import QuantStrategy
 from data.stock_data import StockData
-from db import Database, MarketSnapshot, SectorRecommendation, StockSignal, AINews, AISectorAnalysis
+from db import Database, MarketSnapshot, SectorRecommendation, StockSignal, AINews, AISectorAnalysis, SectorDailyPerformance
 
 
 # 交易日判断：简单排除周末
@@ -50,7 +50,7 @@ def get_trading_date(date_str: Optional[str] = None) -> tuple[str, str]:
     return target.strftime('%Y-%m-%d'), target.strftime('%Y-%m-%d')
 
 
-def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: List[str] = None, ai_enabled: bool = True) -> Dict[str, Any]:
+def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: List[str] = None, ai_enabled: bool = True, refresh_realtime_only: bool = False) -> Dict[str, Any]:
     """
     执行收盘后流水线
 
@@ -58,6 +58,8 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: L
         trade_date: 指定交易日期，None 则自动获取最近交易日
         enabled_sources: 启用的新闻源列表，None 表示全部启用
         ai_enabled: 是否启用AI分析（新闻生成+板块分析）
+        refresh_realtime_only: 仅更新实时数据模式。当天已搜索过新闻后，
+                              设为True可跳过新闻搜索和板块分析，只更新市场快照、个股数据
 
     Returns:
         dict with status, trade_date, data_date, market_snapshot,
@@ -113,9 +115,31 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: L
         result['status'] = 'degraded'
         print(f"[Pipeline] 市场快照采集失败: {e}")
     
+    # Step 1.5: 记录板块当日涨跌幅（不依赖 AI，始终执行）
+    sector_list = []
+    print("[Pipeline Step 1.5] 记录板块实际涨跌幅...")
+    try:
+        sector_list = sector.get_sector_list()
+        perfs = []
+        for s in sector_list:
+            perfs.append(SectorDailyPerformance(
+                trade_date=trade_date,
+                sector_name=s['name'],
+                change_pct=s['change'],
+                stock_count=s.get('stock_count', 0)
+            ))
+        if perfs:
+            db.batch_upsert_sector_daily_performance(perfs)
+            print(f"[Pipeline] 板块涨跌幅已记录，共 {len(perfs)} 个板块")
+    except Exception as e:
+        result['errors'].append(f'sector_performance: {str(e)}')
+        print(f"[Pipeline] 板块涨跌幅记录失败: {e}")
+
     # Step 2: AI新闻生成
     structured_news = []
-    if not ai_enabled:
+    if refresh_realtime_only:
+        print("[Pipeline Step 2/6] 仅更新实时数据模式，跳过AI新闻生成")
+    elif not ai_enabled:
         print("[Pipeline Step 2/6] AI分析已关闭，跳过AI新闻生成")
     else:
         print("[Pipeline Step 2/6] AI新闻生成...")
@@ -149,7 +173,9 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: L
             print(f"[Pipeline] AI新闻生成失败: {e}")
 
     # Step 3: AI板块分析
-    if not ai_enabled:
+    if refresh_realtime_only:
+        print("[Pipeline Step 3/7] 仅更新实时数据模式，跳过AI板块分析")
+    elif not ai_enabled:
         print("[Pipeline Step 3/7] AI分析已关闭，跳过AI板块分析")
     else:
         print("[Pipeline Step 3/7] AI板块分析...")
@@ -170,9 +196,10 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: L
                         'related_sectors_json': news.related_sectors_json
                     })
 
-                # 调用AI板块分析
+                # 调用AI板块分析（传入板块名列表，确保AI只从真实板块中选择）
                 from ai.sector_analyzer import ai_sector_analyzer
-                sector_analysis = ai_sector_analyzer.analyze_sectors(ai_news_list)
+                sector_names = [s['name'] for s in sector_list] if sector_list else None
+                sector_analysis = ai_sector_analyzer.analyze_sectors(ai_news_list, sector_names=sector_names)
 
                 if sector_analysis.get('sector_analysis'):
                     ai_sector_analyzer.save_to_db(trade_date, sector_analysis)
