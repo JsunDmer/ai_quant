@@ -135,6 +135,9 @@ def _fetch_eastmoney(limit: int = 20) -> List[Dict]:
 
         import json
         data = json.loads(text)
+        # 确保 data 是字典，如果是列表则设为空
+        if not isinstance(data, dict):
+            data = {}
         items = data.get('data', {}).get('list', [])
         for item in items:
             title = item.get('title', '')
@@ -177,6 +180,9 @@ def _fetch_eastmoney(limit: int = 20) -> List[Dict]:
 
             import json
             data = json.loads(text)
+            # 确保 data 是字典，如果是列表则设为空
+            if not isinstance(data, dict):
+                data = {}
             items = data.get('data', {}).get('list', [])
             for item in items:
                 title = item.get('title', '')
@@ -226,6 +232,9 @@ def _fetch_sina(limit: int = 20) -> List[Dict]:
         resp.raise_for_status()
 
         data = resp.json()
+        # 确保 data 是字典，如果是列表则设为空
+        if not isinstance(data, dict):
+            data = {}
         items = data.get('result', {}).get('data', [])
         for item in items:
             title = item.get('title', '')
@@ -268,7 +277,14 @@ def _fetch_sina(limit: int = 20) -> List[Dict]:
             resp.raise_for_status()
 
             data = resp.json()
-            items = data.get('result', {}).get('data', {}).get('feed', {}).get('list', [])
+            # 确保 data 是字典，如果是列表则设为空
+            if not isinstance(data, dict):
+                data = {}
+            result = data.get('result', {})
+            # 确保 result 是字典
+            if not isinstance(result, dict):
+                result = {}
+            items = result.get('data', {}).get('feed', {}).get('list', [])
             for item in items:
                 content = item.get('rich_text', '') or item.get('text', '')
                 content = re.sub(r'<[^>]+>', '', content)
@@ -635,7 +651,11 @@ def _fetch_jiemian(limit: int = 20) -> List[Dict]:
         if text.startswith('(') and text.endswith(')'):
             text = text[1:-1]
         data = json.loads(text) if text.startswith('{') or text.startswith('[') else {}
-        html = data.get('data', data.get('html', text))
+        # 确保 data 是字典，如果是列表则使用 text
+        if isinstance(data, dict):
+            html = data.get('data', data.get('html', text))
+        else:
+            html = text
         if not isinstance(html, str):
             html = str(html)
         soup = BeautifulSoup(html, 'html.parser')
