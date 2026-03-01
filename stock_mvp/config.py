@@ -34,6 +34,12 @@ class Config:
     
     # 报警配置
     DEFAULT_ALARM_PERCENT: float = 3.0
+
+    DATA_SOURCE_PRIORITY: str = os.getenv("DATA_SOURCE_PRIORITY", "akshare,efinance,tushare")
+    REALTIME_SOURCE_PRIORITY: str = os.getenv(
+        "REALTIME_SOURCE_PRIORITY",
+        "akshare_em,akshare_sina,akshare_tencent",
+    )
     
     # 收盘模式配置
     TRADING_TIMEZONE: str = os.getenv("TRADING_TIMEZONE", "Asia/Shanghai")

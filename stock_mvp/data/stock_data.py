@@ -2,8 +2,9 @@
 股票数据获取模块
 使用 AKShare 统一获取 A 股实时行情和历史数据
 """
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, cast
 from datetime import datetime, timedelta
+import importlib
 import akshare as ak
 import pandas as pd
 import time
@@ -11,20 +12,29 @@ import time
 
 class StockData:
     """股票数据获取"""
-    
+
     def __init__(self):
         self._spot_cache = None
         self._spot_cache_time = 0
         self._cache_duration = 60
-    
+
     def _get_spot_data(self) -> pd.DataFrame:
-        """获取行情数据（带缓存，60秒内不重复下载）"""
         now = time.time()
         if self._spot_cache is None or (now - self._spot_cache_time) > self._cache_duration:
             print("正在下载行情数据...")
-            self._spot_cache = ak.stock_zh_a_spot_em()
-            self._spot_cache_time = now
-            print(f"行情数据下载完成，共 {len(self._spot_cache)} 只股票")
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    self._spot_cache = ak.stock_zh_a_spot_em()
+                    self._spot_cache_time = now
+                    print(f"行情数据下载完成，共 {len(self._spot_cache)} 只股票")
+                    return self._spot_cache
+                except Exception as e:
+                    print(f"行情数据下载失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(2)
+            print("行情数据下载失败，返回空数据")
+            return pd.DataFrame()
         return self._spot_cache
     
     def search_stock(self, keyword: str) -> List[Dict[str, Any]]:
@@ -35,11 +45,13 @@ class StockData:
             # 精确匹配股票代码
             exact = df[df['代码'] == keyword]
             if not exact.empty:
-                return exact[['代码', '名称']].to_dict('records')
+                exact_records = pd.DataFrame(exact.loc[:, ['代码', '名称']])
+                return exact_records.to_dict(orient="records")
             
             # 模糊匹配名称
             result = df[df['名称'].str.contains(keyword, na=False)].head(20)
-            return result[['代码', '名称']].to_dict('records')
+            result_records = pd.DataFrame(result.loc[:, ['代码', '名称']])
+            return result_records.to_dict(orient="records")
         except Exception as e:
             print(f"搜索股票失败: {e}")
             return []
@@ -93,35 +105,100 @@ class StockData:
         except Exception as e:
             print(f"批量获取行情失败: {e}")
             return []
+
+    def _normalize_kline_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        column_map = {
+            "日期": "date",
+            "开盘": "open",
+            "收盘": "close",
+            "最高": "high",
+            "最低": "low",
+            "成交量": "volume",
+            "成交额": "amount",
+            "涨跌幅": "pct_chg",
+            "涨跌额": "change_amount",
+            "换手率": "turnover_rate",
+        }
+        renamed = df.rename(columns=column_map)
+        required = ["date", "open", "high", "low", "close", "volume", "amount", "pct_chg"]
+        for name in required:
+            if name not in renamed.columns:
+                renamed[name] = pd.NA
+        normalized = renamed.copy()
+        normalized["date"] = pd.to_datetime(normalized["date"], errors="coerce")
+        for col in ["open", "high", "low", "close", "volume", "amount", "pct_chg"]:
+            normalized[col] = pd.to_numeric(normalized[col], errors="coerce")
+        normalized = normalized.sort_values("date").reset_index(drop=True)
+        return normalized
+
+    def _fake_kline_df(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "日期": ["2024-01-01"],
+                "开盘": [10],
+                "收盘": [12],
+                "最高": [13],
+                "最低": [9],
+                "成交量": [1000],
+                "成交额": [10000],
+                "涨跌幅": [1.2],
+            }
+        )
+
+    def _fetch_kline_akshare(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        return ak.stock_zh_a_hist(
+            symbol=stock_code,
+            period="daily",
+            start_date=start_date,
+            end_date=end_date,
+            adjust="qfq",
+        )
+
+    def _fetch_kline_efinance(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        try:
+            ef = importlib.import_module("efinance")
+        except Exception as exc:
+            raise RuntimeError("efinance not available") from exc
+        df = ef.stock.get_quote_history(stock_code, beg=start_date, end=end_date)
+        return pd.DataFrame(df)
+
+    def _fetch_kline_tushare(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        try:
+            ts = importlib.import_module("tushare")
+        except Exception as exc:
+            raise RuntimeError("tushare not available") from exc
+        pro = ts.pro_api()
+        df = pro.daily(ts_code=stock_code, start_date=start_date, end_date=end_date)
+        return pd.DataFrame(df)
     
     def get_kline_data(self, stock_code: str, days: int = 60) -> pd.DataFrame:
         """获取 K 线数据"""
         try:
             end_date = datetime.now().strftime('%Y%m%d')
             start_date = (datetime.now() - timedelta(days=days)).strftime('%Y%m%d')
-            
-            df = ak.stock_zh_a_hist(
-                symbol=stock_code,
-                period="daily",
-                start_date=start_date,
-                end_date=end_date,
-                adjust="qfq"
-            )
-            
-            df = df.rename(columns={
-                '日期': 'date',
-                '开盘': 'open',
-                '收盘': 'close',
-                '最高': 'high',
-                '最低': 'low',
-                '成交量': 'volume',
-                '成交额': 'amount',
-                '涨跌幅': 'change_percent',
-                '涨跌额': 'change_amount',
-                '换手率': 'turnover_rate'
-            })
-            
-            return df[['date', 'open', 'close', 'high', 'low', 'volume', 'change_percent']]
+            config_module = importlib.import_module("config")
+            priority = [
+                item.strip()
+                for item in config_module.Config().DATA_SOURCE_PRIORITY.split(",")
+                if item.strip()
+            ]
+            fetchers = {
+                "akshare": self._fetch_kline_akshare,
+                "efinance": self._fetch_kline_efinance,
+                "tushare": self._fetch_kline_tushare,
+            }
+            for source in priority:
+                fetcher = fetchers.get(source)
+                if fetcher is None:
+                    continue
+                try:
+                    df = fetcher(stock_code, start_date, end_date)
+                except Exception:
+                    continue
+                if df.empty:
+                    continue
+                return self._normalize_kline_df(df)
+            return pd.DataFrame()
         except Exception as e:
             print(f"获取 K 线数据失败: {e}")
             return pd.DataFrame()
