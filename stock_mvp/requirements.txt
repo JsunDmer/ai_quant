@@ -33,3 +33,4 @@ schedule>=1.2.0
 
 # Utils
 python-dotenv>=1.0.0
+exchange-calendars>=4.6

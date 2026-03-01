@@ -13,6 +13,7 @@ CLI 用法:
 """
 import json
 import click
+import importlib
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 
@@ -39,10 +40,24 @@ def get_trading_date(date_str: Optional[str] = None) -> tuple[str, str]:
     else:
         target = datetime.now()
     
-    # 尝试找到最近的交易日
+    try:
+        ecals = importlib.import_module("exchange_calendars")
+        calendar = ecals.get_calendar("XSHG")
+        target_day = target.date()
+        if calendar.is_session(target_day):
+            return target.strftime('%Y-%m-%d'), target.strftime('%Y-%m-%d')
+        sessions = calendar.sessions_in_range(
+            (target - timedelta(days=30)).date(), target_day
+        )
+        if len(sessions) > 0:
+            last_session = sessions[-1]
+            return last_session.strftime('%Y-%m-%d'), target.strftime('%Y-%m-%d')
+    except Exception:
+        pass
+
+    # 兜底：排除周末
     for i in range(7):
         check_date = target - timedelta(days=i)
-        # 排除周末 (weekday: 5=Sat, 6=Sun)
         if check_date.weekday() < 5:
             return check_date.strftime('%Y-%m-%d'), target.strftime('%Y-%m-%d')
     
@@ -50,7 +65,7 @@ def get_trading_date(date_str: Optional[str] = None) -> tuple[str, str]:
     return target.strftime('%Y-%m-%d'), target.strftime('%Y-%m-%d')
 
 
-def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: List[str] = None, ai_enabled: bool = True, refresh_realtime_only: bool = False) -> Dict[str, Any]:
+def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: Optional[List[str]] = None, ai_enabled: bool = True, refresh_realtime_only: bool = False) -> Dict[str, Any]:
     """
     执行收盘后流水线
 
@@ -90,7 +105,7 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: L
     # Step 2: 市场快照采集
     print("[Pipeline Step 1/5] 采集市场快照...")
     try:
-        snapshot = market.collect_post_close_snapshot(trade_date, enabled_sources=enabled_sources)
+        snapshot = market.collect_post_close_snapshot(trade_date, enabled_sources=enabled_sources or [])
         result['market_snapshot'] = snapshot
         
         # 保存到数据库
@@ -198,7 +213,7 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: L
 
                 # 调用AI板块分析（传入板块名列表，确保AI只从真实板块中选择）
                 from ai.sector_analyzer import ai_sector_analyzer
-                sector_names = [s['name'] for s in sector_list] if sector_list else None
+                sector_names = [s['name'] for s in sector_list] if sector_list else []
                 sector_analysis = ai_sector_analyzer.analyze_sectors(ai_news_list, sector_names=sector_names)
 
                 if sector_analysis.get('sector_analysis'):
