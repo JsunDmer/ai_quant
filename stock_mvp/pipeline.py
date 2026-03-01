@@ -92,6 +92,7 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
         'market_snapshot': None,
         'sector_recommendations': [],
         'stock_signals': [],
+        'dashboard_report': {},
         'errors': []
     }
     
@@ -340,6 +341,19 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
         result['errors'].append(f'signal_generation: {str(e)}')
         result['status'] = 'degraded'
         print(f"[Pipeline] 信号生成失败: {e}")
+
+    summary = {
+        "sectors": len(result.get('sector_recommendations', [])),
+        "signals": len(result.get('stock_signals', [])),
+        "status": result.get('status'),
+    }
+    result['dashboard_report'] = {
+        "headline": f"交易日 {trade_date} 分析完成",
+        "summary": summary,
+        "action_points": [],
+        "risk_alerts": result.get('errors', []),
+        "checklist": [],
+    }
 
     # 完成
     print(f"[Pipeline] 流水线完成，状态: {result['status']}")
