@@ -31,13 +31,14 @@ class AISectorAnalyzer:
         )
         self.model = config.LLM_MODEL
     
-    def analyze_sectors(self, ai_news_list: List[Dict]) -> Dict[str, Any]:
+    def analyze_sectors(self, ai_news_list: List[Dict], sector_names: List[str] = None) -> Dict[str, Any]:
         """
         基于AI新闻分析板块
-        
+
         Args:
             ai_news_list: AI生成的新闻列表
-            
+            sector_names: 动态板块名列表（来自AKShare），None时使用MAIN_SECTORS
+
         Returns:
             {
                 "sector_analysis": [...],
@@ -47,8 +48,8 @@ class AISectorAnalyzer:
         """
         if not ai_news_list:
             return {"sector_analysis": [], "market_overview": "", "hot_sectors": []}
-        
-        prompt = self._build_prompt(ai_news_list)
+
+        prompt = self._build_prompt(ai_news_list, sector_names=sector_names)
         result = self._call_llm(prompt)
         
         try:
@@ -69,9 +70,13 @@ class AISectorAnalyzer:
             print(f"[AI Sector Analyzer] JSON解析失败: {e}")
             return {"sector_analysis": [], "market_overview": "", "hot_sectors": []}
     
-    def _build_prompt(self, ai_news_list: List[Dict]) -> str:
+    def _build_prompt(self, ai_news_list: List[Dict], sector_names: List[str] = None) -> str:
         """构建板块分析提示词"""
-        
+
+        # 确定板块列表
+        sectors_pool = sector_names if sector_names else self.MAIN_SECTORS
+        sector_list_text = "、".join(sectors_pool[:100])  # 限制长度
+
         # 格式化新闻列表
         news_text = ""
         for i, news in enumerate(ai_news_list):
@@ -84,14 +89,14 @@ class AISectorAnalyzer:
                 sectors = json.loads(sectors) if isinstance(sectors, str) else sectors
             except:
                 sectors = []
-            
+
             news_text += f"""
 {i+1}. 【{title}】
    简介: {summary}
    分类: {category} | 情绪: {sentiment}
    相关板块: {', '.join(sectors) if sectors else '无'}
 """
-        
+
         prompt = f"""你是一位专业的A股板块分析师。请基于今日新闻，分析各板块的涨跌趋势。
 
 【今日新闻】
@@ -120,7 +125,8 @@ class AISectorAnalyzer:
 3. score_up + score_down 应接近 100
 4. reasons要具体引用新闻内容
 5. 只分析有新闻支撑的板块，不要凭空捏造
-6. 输出必须是合法的JSON格式"""
+6. 输出必须是合法的JSON格式
+7. 板块名称必须从以下列表中选择: {sector_list_text}"""
         return prompt
     
     def _call_llm(self, prompt: str) -> str:
