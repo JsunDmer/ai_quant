@@ -646,17 +646,15 @@ def main():
         if schedule_enabled and schedule_time:
             now = datetime.now()
             if now.time() >= schedule_time:
-                if latest_snapshot is None or latest_snapshot.trade_date != now.strftime('%Y-%m-%d'):
+                from pipeline import run_post_close_pipeline, get_trading_date
+                trade_date, data_date = get_trading_date(now.strftime('%Y-%m-%d'))
+                if trade_date != data_date:
+                    st.info("📅 非交易日，自动跳过执行")
+                elif latest_snapshot is None or latest_snapshot.trade_date != trade_date:
                     st.info("⏰ 定时任务触发，正在自动执行分析...")
                     with st.spinner("自动执行收盘分析中..."):
-                        from pipeline import run_post_close_pipeline, get_trading_date
-
                         sources = st.session_state.get('enabled_sources')
                         ai_on = st.session_state.get('ai_analysis_enabled', True)
-
-                        # 使用实际交易日期（处理周末自动回退）
-                        trade_date, _ = get_trading_date()
-
                         # 检查该交易日期是否已有新闻分析
                         has_news = db.has_ai_news_for_date(trade_date)
 
