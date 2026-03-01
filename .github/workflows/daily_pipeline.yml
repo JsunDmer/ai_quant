@@ -34,3 +34,11 @@ jobs:
       - name: Run post-close pipeline
         working-directory: stock_mvp
         run: python -m pipeline run-post-close
+
+      # - name: Upload artifacts (optional)
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: stock-mvp-artifacts
+      #     path: |
+      #       stock_mvp/stock_mvp.db
+      #       stock_mvp/reports/
