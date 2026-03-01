@@ -28,6 +28,10 @@ stock_mvp/
 │   ├── __init__.py
 │   ├── news_generator.py      # AI 结构化新闻生成
 │   └── sector_analyzer.py     # AI 板块方向分析
+├── evaluation/                # 预测评估层
+│   ├── __init__.py
+│   ├── sector_evaluator.py    # 板块预测评估引擎 (T+1/T+3/T+5 准确率)
+│   └── trade_simulator.py     # 模拟交易引擎 (建仓/平仓/收益统计)
 ├── strategy/                  # 量化策略层
 │   ├── __init__.py
 │   └── quant_strategy.py      # 量化策略 (均线/RSI/量价/动量技术分析)
@@ -35,7 +39,7 @@ stock_mvp/
 └── start.sh                   # 启动脚本
 ```
 
-## UI 布局 (三大模块)
+## UI 布局 (五大模块)
 
 页面顶部: 标题 + 执行分析按钮 + 可展开设置面板 (API Key/定时任务/新闻源/AI开关)
 不使用 Streamlit sidebar，设置用 st.expander 实现。
@@ -54,12 +58,28 @@ stock_mvp/
 - **右列**: 预估下跌个股 (卖出信号)
 - **底部**: 我的持仓 (支持添加/删除自持个股)
 
+### Tab 4: 评估报告
+- **顶部**: 日期范围选择 + 刷新评估按钮
+- **准确率**: T+1/T+3/T+5 三列 st.metric
+- **趋势图**: Plotly 折线图 (蓝/绿/黄三条线)
+- **分组统计**: 按置信度分组 + 按预测方向分组 (Plotly 条形图)
+- **明细**: 预测明细表 (st.dataframe, 默认收起)
+
+### Tab 5: 量化策略评估
+- **顶部**: 日期范围选择 + 刷新模拟按钮
+- **指标**: 总交易/胜率/平均收益/总收益/盈亏比/持仓中 (6列 st.metric)
+- **曲线**: 累计收益曲线 (Plotly 面积图)
+- **分组**: 按板块分组 + 按置信度分组 (Plotly 条形图)
+- **明细**: 交易明细表 (st.dataframe, 默认收起)
+
 ## Pipeline 流程 (执行分析)
 
 ```
-Step 1: 市场快照采集 → market_snapshots 表
-        (指数/涨跌/成交额/北向资金，新闻采集已暂停)
-Step 2: AI新闻生成 → ai_news 表
+Step 1:   市场快照采集 → market_snapshots 表
+          (指数/涨跌/成交额/北向资金，新闻采集已暂停)
+Step 1.5: 板块涨跌幅采集 → sector_daily_performance 表
+          (从AKShare获取板块列表及涨跌幅，板块名列表供后续AI分析复用)
+Step 2:   AI新闻生成 → ai_news 表
         (将原始新闻发给LLM生成结构化摘要，当前因无新闻源会跳过)
 Step 3: AI板块分析 → ai_sector_analysis 表
         (基于AI新闻判断板块方向/概率/置信度)
@@ -85,6 +105,9 @@ Step 5: 候选股票筛选 + 信号生成 → stock_signals 表
 | `followed_stocks` | 用户自持个股 |
 | `analysis_records` | AI分析历史记录 |
 | `alert_records` | 价格报警记录 |
+| `sector_daily_performance` | 板块每日实际涨跌幅 (Pipeline Step 1.5 写入) |
+| `prediction_evaluations` | 预测评估结果 (T+1/T+3/T+5 准确率) |
+| `simulated_trades` | 模拟交易记录 (建仓/平仓/收益率/止损止盈) |
 
 ## 关键设计决策
 
@@ -94,6 +117,8 @@ Step 5: 候选股票筛选 + 信号生成 → stock_signals 表
 4. **AI新闻生成 prompt 保留原始 URL**: 要求 AI 在输出中保留 source_url 字段
 5. **不使用 Streamlit sidebar**: 因 header/deploy/sidebar-toggle 绑定无法分离，改用页面顶部 expander
 6. **多源新闻采集**: news_collector.py 支持 9 个 RSS/网页源自动采集
+7. **板块名称统一**: Pipeline Step 1.5 获取AKShare板块名列表，传给AI prompt约束输出，确保预测与实际数据的板块名精确匹配
+8. **预测评估引擎**: 自动回溯AI板块预测，计算T+1/T+3/T+5累计涨跌幅，判断方向正确性
 
 ## 已知缺失/暂停模块
 
