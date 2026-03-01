@@ -397,6 +397,14 @@ def run_post_close_cli(date: Optional[str]):
         click.echo(f"\n⚠️ 错误信息:")
         for err in result['errors']:
             click.echo(f"  - {err}")
+
+    report = result.get('dashboard_report', {})
+    if report:
+        click.echo("\n===== 决策仪表盘 =====")
+        click.echo(f"结论: {report.get('headline', '')}")
+        summary = report.get('summary', {})
+        if summary:
+            click.echo(f"摘要: {summary}")
     
     if result['status'] == 'ok':
         click.echo("\n✅ 流水线执行成功")

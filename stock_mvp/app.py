@@ -776,6 +776,21 @@ def render_market_overview():
             st.warning("⚠️ 降级模式")
     with col3:
         st.markdown(f"*数据更新: {snapshot.created_at}*")
+
+    if snapshot:
+        report = {
+            "headline": f"交易日 {snapshot.trade_date} 分析完成",
+            "summary": {
+                "news": len(news),
+                "indices": len(indices) if isinstance(indices, list) else len(indices.keys()),
+            },
+        }
+        st.markdown("---")
+        st.subheader("🎯 决策仪表盘")
+        st.markdown(f"**结论**: {report.get('headline', '')}")
+        summary = report.get('summary', {})
+        if summary:
+            st.caption(f"摘要: {summary}")
     
     st.markdown("---")
     
