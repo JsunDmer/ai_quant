@@ -28,23 +28,50 @@ def call_opencode(prompt: str) -> str:
     """调用OpenCode CLI执行分析"""
     try:
         result = subprocess.run(
-            ["opencode", "chat", "--message", prompt],
+            ["opencode", "run", "--format", "json", prompt],
             capture_output=True, text=True, timeout=120
         )
-        return result.stdout if result.returncode == 0 else f"ERROR: {result.stderr}"
-    except FileNotFoundError:
-        return "ERROR: opencode command not found"
+        if result.returncode != 0:
+            return f"ERROR: {result.stderr}"
+        
+        import json
+        text_content = ''
+        for line in result.stdout.strip().split('\n'):
+            try:
+                event = json.loads(line)
+                if event.get('type') == 'text':
+                    text_content = event.get('part', {}).get('text', '')
+                    break
+            except json.JSONDecodeError:
+                continue
+        
+        if not text_content:
+            return "ERROR: no text in response"
+        
+        import re
+        match = re.search(r'```json\s*(.*?)\s*```', text_content, re.DOTALL)
+        if match:
+            return match.group(1)
+        
+        match = re.search(r'\[.*\]', text_content, re.DOTALL)
+        if match:
+            return match.group(0)
+        
+        return text_content
     except subprocess.TimeoutExpired:
         return "ERROR: timeout after 120s"
+    except FileNotFoundError:
+        return "ERROR: opencode command not found"
+    except Exception as e:
+        return f"ERROR: {str(e)}"
 
 
 def run_step2_ai_news(trade_date: str, db: Database) -> dict:
     """Step 2: AI新闻生成"""
     print(f"[CLI] Step 2: AI新闻生成 for {trade_date}")
     
-    from data.market_data import MarketData
-    market = MarketData()
-    news = market.collect_news(limit=20)
+    from data.news_collector import collect_all_news
+    news = collect_all_news(limit=20)
     
     if not news:
         return {"step": 2, "status": "skipped", "reason": "no_raw_news"}
