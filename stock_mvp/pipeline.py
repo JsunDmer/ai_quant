@@ -3,8 +3,9 @@
 
 功能:
 - 市场快照采集
+- AI新闻生成
+- AI板块分析
 - 板块评分与推荐
-- 个股信号生成
 - 数据持久化存储
 
 CLI 用法:
@@ -22,8 +23,7 @@ akshare_patch.patch()
 
 from data.market_data import MarketData
 from data.sector_data import SectorData
-from strategy.quant_strategy import QuantStrategy
-from data.stock_data import StockData
+
 from db import Database, MarketSnapshot, SectorRecommendation, StockSignal, AINews, AISectorAnalysis, SectorDailyPerformance
 
 
@@ -99,12 +99,10 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
     # 初始化模块
     market = MarketData()
     sector = SectorData()
-    strategy = QuantStrategy()
-    stock_db = StockData()
     db = Database()
     
-    # Step 2: 市场快照采集
-    print("[Pipeline Step 1/5] 采集市场快照...")
+    # Step 1: 市场快照采集
+    print("[Pipeline Step 1/3] 采集市场快照...")
     try:
         snapshot = market.collect_post_close_snapshot(trade_date, enabled_sources=enabled_sources or [])
         result['market_snapshot'] = snapshot
@@ -154,11 +152,11 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
     # Step 2: AI新闻生成
     structured_news = []
     if refresh_realtime_only:
-        print("[Pipeline Step 2/6] 仅更新实时数据模式，跳过AI新闻生成")
+        print("[Pipeline Step 2/3] 仅更新实时数据模式，跳过AI新闻生成")
     elif not ai_enabled:
-        print("[Pipeline Step 2/6] AI分析已关闭，跳过AI新闻生成")
+        print("[Pipeline Step 2/3] AI分析已关闭，跳过AI新闻生成")
     else:
-        print("[Pipeline Step 2/6] AI新闻生成...")
+        print("[Pipeline Step 2/3] AI新闻生成...")
         try:
             # 获取原始新闻
             news = []
@@ -190,11 +188,11 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
 
     # Step 3: AI板块分析
     if refresh_realtime_only:
-        print("[Pipeline Step 3/7] 仅更新实时数据模式，跳过AI板块分析")
+        print("[Pipeline Step 3/3] 仅更新实时数据模式，跳过AI板块分析")
     elif not ai_enabled:
-        print("[Pipeline Step 3/7] AI分析已关闭，跳过AI板块分析")
+        print("[Pipeline Step 3/3] AI分析已关闭，跳过AI板块分析")
     else:
-        print("[Pipeline Step 3/7] AI板块分析...")
+        print("[Pipeline Step 3/3] AI板块分析...")
         try:
             # 从数据库获取AI生成的新闻
             ai_news_records = db.get_ai_news(trade_date)
@@ -229,8 +227,8 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
             result['errors'].append(f'ai_sector_analysis: {str(e)}')
             print(f"[Pipeline] AI板块分析失败: {e}")
     
-    # Step 4: 板块评分与推荐
-    print("[Pipeline Step 3/6] 板块评分与推荐...")
+    # Step 3: 板块评分与推荐
+    print("[Pipeline Step 3/3] 板块评分与推荐...")
     try:
         sector_results = sector.recommend_sectors()
         
@@ -262,85 +260,6 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
         result['errors'].append(f'sector_scoring: {str(e)}')
         result['status'] = 'degraded'
         print(f"[Pipeline] 板块评分失败: {e}")
-    
-    # Step 4: 候选股票筛选
-    print("[Pipeline Step 3/5] 筛选候选股票...")
-    candidate_stocks = []
-    try:
-        # 从强推荐板块中筛选候选
-        strong_recommend = result.get('sector_recommendations', [])
-        strong_sectors = [r['sector_name'] for r in strong_recommend if r['bucket'] == 'strong_recommend'][:5]
-        
-        for sector_name in strong_sectors:
-            try:
-                candidates = sector.pick_candidates_for_sector(sector_name, min_count=3, trade_date=trade_date)
-                for c in candidates:
-                    c['sector_name'] = sector_name
-                candidate_stocks.extend(candidates)
-            except Exception as e:
-                print(f"[Pipeline] 筛选板块 {sector_name} 失败: {e}")
-        
-        print(f"[Pipeline] 候选股票 {len(candidate_stocks)} 只")
-        
-    except Exception as e:
-        result['errors'].append(f'candidate_pick: {str(e)}')
-        result['status'] = 'degraded'
-        print(f"[Pipeline] 候选股票筛选失败: {e}")
-    
-    # Step 5: 信号生成
-    print("[Pipeline Step 4/5] 生成交易信号...")
-    try:
-        signals = []
-        for candidate in candidate_stocks:
-            try:
-                code = candidate['code']
-                name = candidate['name']
-                sector_name = candidate.get('sector_name', '')
-                
-                # 获取K线数据
-                kline = stock_db.get_kline_data(code, 60)
-                if kline.empty or len(kline) < 20:
-                    continue
-                
-                # 技术分析
-                analysis = strategy.analyze_stock(code, kline)
-                
-                # 只保留买入信号
-                if analysis['signal'] in ['strong_buy', 'buy']:
-                    signal_data = {
-                        'stock_code': code,
-                        'stock_name': name,
-                        'sector_name': sector_name,
-                        'signal': analysis['signal'],
-                        'confidence': analysis['confidence'],
-                        'factors': analysis['factors'],
-                        'price': candidate.get('price', 0),
-                        'change': candidate.get('change', 0)
-                    }
-                    signals.append(signal_data)
-                    
-                    # 保存到数据库
-                    db_signal = StockSignal(
-                        trade_date=trade_date,
-                        stock_code=code,
-                        stock_name=name,
-                        sector_name=sector_name,
-                        signal=analysis['signal'],
-                        confidence=analysis['confidence'],
-                        factors_json=json.dumps(analysis['factors'])
-                    )
-                    db.upsert_stock_signal(db_signal)
-                    
-            except Exception as e:
-                print(f"[Pipeline] 分析 {candidate.get('code')} 失败: {e}")
-        
-        result['stock_signals'] = signals
-        print(f"[Pipeline] 买入信号 {len(signals)} 个")
-        
-    except Exception as e:
-        result['errors'].append(f'signal_generation: {str(e)}')
-        result['status'] = 'degraded'
-        print(f"[Pipeline] 信号生成失败: {e}")
 
     summary = {
         "sectors": len(result.get('sector_recommendations', [])),
