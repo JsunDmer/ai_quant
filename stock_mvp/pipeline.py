@@ -24,7 +24,7 @@ akshare_patch.patch()
 from data.market_data import MarketData
 from data.sector_data import SectorData
 
-from db import Database, MarketSnapshot, SectorRecommendation, StockSignal, AINews, AISectorAnalysis, SectorDailyPerformance
+from db import Database, MarketSnapshot, SectorRecommendation, AINews, AISectorAnalysis, SectorDailyPerformance
 
 
 # 交易日判断：简单排除周末

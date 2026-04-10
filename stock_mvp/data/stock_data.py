@@ -268,28 +268,25 @@ class StockData:
             }
         """
         try:
-            df = None
+            # 确定市场代码
+            market = "sh" if stock_code.startswith("6") else "sz"
+            
             # 使用 akshare 的个股资金流向接口
-            # 尝试多个市场类型
-            for market_type in ["主板", "创业板", "科创板"]:
-                try:
-                    df = ak.stock_individual_fund_flow_em(symbol=stock_code, market=market_type)
-                    if df is not None and not df.empty:
-                        break
-                except:
-                    continue
+            # API: ak.stock_individual_fund_flow(stock="600519", market="sh")
+            df = ak.stock_individual_fund_flow(stock=stock_code, market=market)
             
             if df is None or df.empty:
+                print(f"[StockData] 资金流向 {stock_code} 无数据")
                 return self._empty_capital_flow()
             
             latest = df.iloc[0]
             result = {
-                'main_inflow': float(latest.get('主力净流入', 0)) if pd.notna(latest.get('主力净流入')) else 0,
-                'main_inflow_pct': float(latest.get('主力净流入占比', 0)) if pd.notna(latest.get('主力净流入占比')) else 0,
-                'super_inflow': float(latest.get('超大单净流入', 0)) if pd.notna(latest.get('超大单净流入')) else 0,
-                'large_inflow': float(latest.get('大单净流入', 0)) if pd.notna(latest.get('大单净流入')) else 0,
-                'medium_inflow': float(latest.get('中单净流入', 0)) if pd.notna(latest.get('中单净流入')) else 0,
-                'small_inflow': float(latest.get('小单净流入', 0)) if pd.notna(latest.get('小单净流入')) else 0,
+                'main_inflow': float(latest.get('主力净流入-净额', 0)) if pd.notna(latest.get('主力净流入-净额')) else 0,
+                'main_inflow_pct': float(latest.get('主力净流入-净占比', 0)) if pd.notna(latest.get('主力净流入-净占比')) else 0,
+                'super_inflow': float(latest.get('超大单净流入-净额', 0)) if pd.notna(latest.get('超大单净流入-净额')) else 0,
+                'large_inflow': float(latest.get('大单净流入-净额', 0)) if pd.notna(latest.get('大单净流入-净额')) else 0,
+                'medium_inflow': float(latest.get('中单净流入-净额', 0)) if pd.notna(latest.get('中单净流入-净额')) else 0,
+                'small_inflow': float(latest.get('小单净流入-净额', 0)) if pd.notna(latest.get('小单净流入-净额')) else 0,
                 'trade_date': str(latest.get('日期', ''))
             }
             print(f"[StockData] 资金流向 {stock_code}，主力净流入: {result['main_inflow']:.2f}万")

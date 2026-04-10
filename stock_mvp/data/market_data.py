@@ -98,9 +98,9 @@ class MarketData:
             news = collect_all_news(limit=limit, enabled_sources=enabled_sources)
             if news:
                 return news
-            print("多源采集返回空结果，尝试 akshare 兜底")
+            print("[MarketData] 多源采集返回空结果，尝试 akshare 兜底")
         except Exception as e:
-            print(f"多源采集失败: {e}")
+            print(f"[MarketData] 多源采集失败: {e}")
 
         # 兜底: akshare
         try:
@@ -118,7 +118,7 @@ class MarketData:
                 })
             return news
         except Exception as e:
-            print(f"akshare 兜底也失败: {e}")
+            print(f"[MarketData] akshare兜底失败: {e}")
             return []
     
     def collect_post_close_snapshot(self, trade_date: Optional[str] = None, enabled_sources: list = None) -> Dict[str, Any]:
@@ -224,11 +224,11 @@ class InternationalDataCollector:
                             'change_pct': change_pct
                         }
                 except Exception as e:
-                    print(f"获取{name}失败: {e}")
+                    print(f"[MarketData] 获取{name}失败: {e}")
                     result[name] = {'price': 0, 'change_pct': 0}
             return result
         except Exception as e:
-            print(f"获取US indices失败: {e}")
+            print(f"[MarketData] 获取US indices失败: {e}")
             return {'dow_jones': {'price': 0, 'change_pct': 0}, 'nasdaq': {'price': 0, 'change_pct': 0}, 'sp500': {'price': 0, 'change_pct': 0}}
     
     def get_commodities(self) -> Dict[str, Any]:
@@ -268,7 +268,7 @@ class InternationalDataCollector:
             
             return result
         except Exception as e:
-            print(f"获取大宗商品失败: {e}")
+            print(f"[MarketData] 获取大宗商品失败: {e}")
             return {'gold': {'price': 0, 'unit': 'USD/oz'}, 'oil_wti': {'price': 0, 'unit': 'USD/barrel'}, 'copper': {'price': 0, 'unit': 'USD/ton'}}
     
     def get_forex(self) -> Dict[str, Any]:
@@ -288,7 +288,7 @@ class InternationalDataCollector:
                 else:
                     result['usd_index'] = {'price': 0}
             except Exception as e:
-                print(f"获取美元指数失败: {e}")
+                print(f"[MarketData] 获取美元指数失败: {e}")
                 result['usd_index'] = {'price': 0}
             
             # USD/CNH
@@ -301,7 +301,7 @@ class InternationalDataCollector:
                 else:
                     result['usdcnh'] = {'price': 0}
             except Exception as e:
-                print(f"获取USDCNH失败: {e}")
+                print(f"[MarketData] 获取USDCNH失败: {e}")
                 result['usdcnh'] = {'price': 0}
             
             # USD/CNY
@@ -314,12 +314,12 @@ class InternationalDataCollector:
                 else:
                     result['usdcny'] = {'price': 0}
             except Exception as e:
-                print(f"获取USDCNY失败: {e}")
+                print(f"[MarketData] 获取USDCNY失败: {e}")
                 result['usdcny'] = {'price': 0}
             
             return result
         except Exception as e:
-            print(f"获取外汇数据失败: {e}")
+            print(f"[MarketData] 获取外汇数据失败: {e}")
             return {'usd_index': {'price': 0}, 'usdcny': {'price': 0}, 'usdcnh': {'price': 0}}
     
     def collect_international_snapshot(self) -> Dict[str, Any]:
@@ -336,19 +336,19 @@ class InternationalDataCollector:
             result['us_indices'] = self.get_us_indices()
         except Exception as e:
             result['us_indices'] = {}
-            print(f"US indices采集失败: {e}")
+            print(f"[MarketData] US indices采集失败: {e}")
         
         try:
             result['commodities'] = self.get_commodities()
         except Exception as e:
             result['commodities'] = {}
-            print(f"大宗商品采集失败: {e}")
+            print(f"[MarketData] 大宗商品采集失败: {e}")
         
         try:
             result['forex'] = self.get_forex()
         except Exception as e:
             result['forex'] = {}
-            print(f"外汇采集失败: {e}")
+            print(f"[MarketData] 外汇采集失败: {e}")
         
         # 检查是否需要降级
         if not result['us_indices'] and not result['commodities'] and not result['forex']:
