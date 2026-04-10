@@ -242,5 +242,61 @@ class StockData:
             print(f"获取市场新闻失败: {e}")
             return []
 
+    def get_stock_capital_flow(self, stock_code: str) -> Dict[str, Any]:
+        """
+        获取个股大资金流向（单日）
+
+        Args:
+            stock_code: 股票代码，如 "600519"
+
+        Returns:
+            {
+                'main_inflow': float,    # 主力净流入(万元)
+                'main_inflow_pct': float, # 主力净流入占比(%)
+                'super_inflow': float,    # 超大单净流入(万元)
+                'large_inflow': float,    # 大单净流入(万元)
+                'medium_inflow': float,   # 中单净流入(万元)
+                'small_inflow': float,    # 小单净流入(万元)
+                'trade_date': str         # 交易日期
+            }
+        """
+        try:
+            df = None
+            # 使用 akshare 的个股资金流向接口
+            # 尝试多个市场类型
+            for market_type in ["主板", "创业板", "科创板"]:
+                try:
+                    df = ak.stock_individual_fund_flow_em(symbol=stock_code, market=market_type)
+                    if df is not None and not df.empty:
+                        break
+                except:
+                    continue
+            
+            if df is None or df.empty:
+                return self._empty_capital_flow()
+            
+            latest = df.iloc[0]
+            return {
+                'main_inflow': float(latest.get('主力净流入', 0)) if pd.notna(latest.get('主力净流入')) else 0,
+                'main_inflow_pct': float(latest.get('主力净流入占比', 0)) if pd.notna(latest.get('主力净流入占比')) else 0,
+                'super_inflow': float(latest.get('超大单净流入', 0)) if pd.notna(latest.get('超大单净流入')) else 0,
+                'large_inflow': float(latest.get('大单净流入', 0)) if pd.notna(latest.get('大单净流入')) else 0,
+                'medium_inflow': float(latest.get('中单净流入', 0)) if pd.notna(latest.get('中单净流入')) else 0,
+                'small_inflow': float(latest.get('小单净流入', 0)) if pd.notna(latest.get('小单净流入')) else 0,
+                'trade_date': str(latest.get('日期', ''))
+            }
+        except Exception as e:
+            print(f"[StockData] 获取个股资金流向失败 {stock_code}: {e}")
+            return self._empty_capital_flow()
+
+    def _empty_capital_flow(self) -> Dict[str, Any]:
+        """返回空资金流向数据"""
+        return {
+            'main_inflow': 0, 'main_inflow_pct': 0,
+            'super_inflow': 0, 'large_inflow': 0,
+            'medium_inflow': 0, 'small_inflow': 0,
+            'trade_date': ''
+        }
+
 
 stock_data = StockData()
