@@ -156,32 +156,23 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
     elif not ai_enabled:
         print("[Pipeline Step 2/3] AI分析已关闭，跳过AI新闻生成")
     else:
-        print("[Pipeline Step 2/3] AI新闻生成...")
+        print("[Pipeline Step 2/3] AI新闻生成 (OpenCode)...")
         try:
-            # 获取原始新闻
-            news = []
-            try:
-                snapshot = result.get('market_snapshot')
-                if snapshot:
-                    news = snapshot.get('news', [])
-            except:
-                pass
-
-            if news:
-                from ai.news_generator import ai_news_generator
-
-                # 生成结构化新闻
-                structured_news = ai_news_generator.generate_structured_news(news)
-
-                if structured_news:
-                    # 保存到数据库
-                    ai_news_generator.save_to_db(trade_date, structured_news)
-                    print(f"[Pipeline] AI新闻已生成，共 {len(structured_news)} 条")
-                else:
-                    print("[Pipeline] AI新闻生成返回空结果")
+            # 使用 subprocess 调用 CLI 脚本
+            import subprocess
+            cli_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli_ai_analysis.py")
+            proc = subprocess.run(
+                ["python", cli_path, trade_date, "2"],
+                capture_output=True, text=True, timeout=300
+            )
+            if proc.returncode == 0:
+                print("[Pipeline] AI新闻生成完成 (OpenCode)")
             else:
-                print("[Pipeline] 无原始新闻，跳过AI新闻生成")
-
+                print(f"[Pipeline] AI新闻生成失败: {proc.stderr[:200]}")
+                result['errors'].append(f'ai_news_generation: {proc.stderr[:100]}')
+        except subprocess.TimeoutExpired:
+            result['errors'].append('ai_news_generation: timeout')
+            print("[Pipeline] AI新闻生成超时")
         except Exception as e:
             result['errors'].append(f'ai_news_generation: {str(e)}')
             print(f"[Pipeline] AI新闻生成失败: {e}")
@@ -192,37 +183,22 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
     elif not ai_enabled:
         print("[Pipeline Step 3/3] AI分析已关闭，跳过AI板块分析")
     else:
-        print("[Pipeline Step 3/3] AI板块分析...")
+        print("[Pipeline Step 3/3] AI板块分析 (OpenCode)...")
         try:
-            # 从数据库获取AI生成的新闻
-            ai_news_records = db.get_ai_news(trade_date)
-
-            if ai_news_records:
-                # 转换为dict格式
-                ai_news_list = []
-                for news in ai_news_records:
-                    ai_news_list.append({
-                        'title': news.title,
-                        'summary': news.summary,
-                        'category': news.category,
-                        'sentiment': news.sentiment,
-                        'keywords_json': news.keywords_json,
-                        'related_sectors_json': news.related_sectors_json
-                    })
-
-                # 调用AI板块分析（传入板块名列表，确保AI只从真实板块中选择）
-                from ai.sector_analyzer import ai_sector_analyzer
-                sector_names = [s['name'] for s in sector_list] if sector_list else []
-                sector_analysis = ai_sector_analyzer.analyze_sectors(ai_news_list, sector_names=sector_names)
-
-                if sector_analysis.get('sector_analysis'):
-                    ai_sector_analyzer.save_to_db(trade_date, sector_analysis)
-                    print(f"[Pipeline] AI板块分析完成，分析了 {len(sector_analysis['sector_analysis'])} 个板块")
-                else:
-                    print("[Pipeline] AI板块分析返回空结果")
+            import subprocess
+            cli_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli_ai_analysis.py")
+            proc = subprocess.run(
+                ["python", cli_path, trade_date, "3"],
+                capture_output=True, text=True, timeout=300
+            )
+            if proc.returncode == 0:
+                print("[Pipeline] AI板块分析完成 (OpenCode)")
             else:
-                print("[Pipeline] 无AI新闻数据，跳过AI板块分析")
-
+                print(f"[Pipeline] AI板块分析失败: {proc.stderr[:200]}")
+                result['errors'].append(f'ai_sector_analysis: {proc.stderr[:100]}')
+        except subprocess.TimeoutExpired:
+            result['errors'].append('ai_sector_analysis: timeout')
+            print("[Pipeline] AI板块分析超时")
         except Exception as e:
             result['errors'].append(f'ai_sector_analysis: {str(e)}')
             print(f"[Pipeline] AI板块分析失败: {e}")
