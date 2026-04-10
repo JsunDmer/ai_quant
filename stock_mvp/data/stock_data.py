@@ -21,19 +21,19 @@ class StockData:
     def _get_spot_data(self) -> pd.DataFrame:
         now = time.time()
         if self._spot_cache is None or (now - self._spot_cache_time) > self._cache_duration:
-            print("正在下载行情数据...")
+            print("[StockData] 正在下载行情数据...")
             max_retries = 3
             for attempt in range(max_retries):
                 try:
                     self._spot_cache = ak.stock_zh_a_spot_em()
                     self._spot_cache_time = now
-                    print(f"行情数据下载完成，共 {len(self._spot_cache)} 只股票")
+                    print(f"[StockData] 行情数据下载完成，共 {len(self._spot_cache)} 只股票")
                     return self._spot_cache
                 except Exception as e:
-                    print(f"行情数据下载失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                    print(f"[StockData] 行情数据下载失败 (尝试 {attempt + 1}/{max_retries}): {e}")
                     if attempt < max_retries - 1:
                         time.sleep(2)
-            print("行情数据下载失败，返回空数据")
+            print("[StockData] 行情数据下载失败，返回空数据")
             return pd.DataFrame()
         return self._spot_cache
     
@@ -59,13 +59,14 @@ class StockData:
     def get_realtime_quote(self, stock_code: str) -> Optional[Dict[str, Any]]:
         """获取实时行情"""
         try:
+            print(f"[StockData] 获取实时行情 {stock_code} ...")
             df = self._get_spot_data()
             stock = df[df['代码'] == stock_code]
             if stock.empty:
                 return None
             
             row = stock.iloc[0]
-            return {
+            result = {
                 'code': row['代码'],
                 'name': row['名称'],
                 'price': float(row['最新价']),
@@ -80,8 +81,10 @@ class StockData:
                 'turnover_rate': float(row.get('换手率', 0)),
                 'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
+            print(f"[StockData] 获取实时行情 {stock_code} 完成，价: {result['price']:.2f}")
+            return result
         except Exception as e:
-            print(f"获取实时行情失败: {e}")
+            print(f"[StockData] 获取实时行情 {stock_code} 失败: {e}")
             return None
     
     def get_batch_quotes(self, stock_codes: List[str]) -> List[Dict[str, Any]]:
@@ -174,6 +177,7 @@ class StockData:
     def get_kline_data(self, stock_code: str, days: int = 60) -> pd.DataFrame:
         """获取 K 线数据"""
         try:
+            print(f"[StockData] 获取K线数据 {stock_code} ...")
             end_date = datetime.now().strftime('%Y%m%d')
             start_date = (datetime.now() - timedelta(days=days)).strftime('%Y%m%d')
             config_module = importlib.import_module("config")
@@ -197,10 +201,13 @@ class StockData:
                     continue
                 if df.empty:
                     continue
-                return self._normalize_kline_df(df)
+                result_df = self._normalize_kline_df(df)
+                print(f"[StockData] 获取K线数据 {stock_code} 完成，共 {len(result_df)} 条")
+                return result_df
+            print(f"[StockData] 获取K线数据 {stock_code} 失败: 所有数据源均无数据")
             return pd.DataFrame()
         except Exception as e:
-            print(f"获取 K 线数据失败: {e}")
+            print(f"[StockData] 获取K线数据 {stock_code} 失败: {e}")
             return pd.DataFrame()
     
     def get_stock_news(self, stock_code: str, limit: int = 10) -> List[Dict[str, str]]:
@@ -276,7 +283,7 @@ class StockData:
                 return self._empty_capital_flow()
             
             latest = df.iloc[0]
-            return {
+            result = {
                 'main_inflow': float(latest.get('主力净流入', 0)) if pd.notna(latest.get('主力净流入')) else 0,
                 'main_inflow_pct': float(latest.get('主力净流入占比', 0)) if pd.notna(latest.get('主力净流入占比')) else 0,
                 'super_inflow': float(latest.get('超大单净流入', 0)) if pd.notna(latest.get('超大单净流入')) else 0,
@@ -285,6 +292,8 @@ class StockData:
                 'small_inflow': float(latest.get('小单净流入', 0)) if pd.notna(latest.get('小单净流入')) else 0,
                 'trade_date': str(latest.get('日期', ''))
             }
+            print(f"[StockData] 资金流向 {stock_code}，主力净流入: {result['main_inflow']:.2f}万")
+            return result
         except Exception as e:
             print(f"[StockData] 获取个股资金流向失败 {stock_code}: {e}")
             return self._empty_capital_flow()

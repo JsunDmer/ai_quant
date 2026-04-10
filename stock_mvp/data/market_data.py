@@ -38,9 +38,10 @@ class MarketData:
                         'price': float(r['最新价']) if pd.notna(r['最新价']) else 0,
                         'change': float(r['涨跌幅']) if pd.notna(r['涨跌幅']) else 0
                     })
+            print(f"[MarketData] 获取指数完成，共 {len(indices)} 个")
             return indices
         except Exception as e:
-            print(f"获取指数失败: {e}")
+            print(f"[MarketData] 获取指数失败: {e}")
             return []
     
     def get_market_breadth(self) -> Dict[str, Any]:
@@ -54,7 +55,7 @@ class MarketData:
             limit_up = len(df[df['涨跌幅'] >= 9.9]) if '涨跌幅' in df.columns else 0
             limit_down = len(df[df['涨跌幅'] <= -9.9]) if '涨跌幅' in df.columns else 0
             
-            return {
+            result = {
                 'total': total,
                 'up': up_count,
                 'down': down_count,
@@ -62,8 +63,10 @@ class MarketData:
                 'limit_up': limit_up,
                 'limit_down': limit_down
             }
+            print(f"[MarketData] 涨跌分布: 涨 {up_count} / 跌 {down_count} / 平 {flat_count}")
+            return result
         except Exception as e:
-            print(f"获取涨跌分布失败: {e}")
+            print(f"[MarketData] 获取涨跌分布失败: {e}")
             return {'total': 0, 'up': 0, 'down': 0, 'flat': 0, 'limit_up': 0, 'limit_down': 0}
     
     def get_turnover(self) -> Dict[str, Any]:
@@ -72,12 +75,14 @@ class MarketData:
             df = self._get_spot_data()
             total_amount = df['成交额'].sum() if '成交额' in df.columns else 0
             total_volume = df['成交量'].sum() if '成交量' in df.columns else 0
-            return {
+            result = {
                 'amount': float(total_amount) if pd.notna(total_amount) else 0,
                 'volume': int(total_volume) if pd.notna(total_volume) else 0
             }
+            print(f"[MarketData] 成交额: {result['amount']/100000000:.2f}亿")
+            return result
         except Exception as e:
-            print(f"获取成交额失败: {e}")
+            print(f"[MarketData] 获取成交额失败: {e}")
             return {'amount': 0, 'volume': 0}
     
     def get_north_flow(self) -> Dict[str, Any]:
@@ -123,6 +128,8 @@ class MarketData:
         if trade_date is None:
             trade_date = datetime.now().strftime('%Y-%m-%d')
         
+        print("[MarketData] 开始采集市场快照...")
+        
         result = {
             'trade_date': trade_date,
             'status': 'ok',
@@ -136,33 +143,38 @@ class MarketData:
         # 采集各类数据
         try:
             result['indices'] = self.get_indices()
+            print("[MarketData] 指数采集完成")
         except Exception as e:
             result['indices'] = []
-            print(f"指数采集失败: {e}")
+            print(f"[MarketData] 指数采集失败: {e}")
         
         try:
             result['market_breadth'] = self.get_market_breadth()
+            print("[MarketData] 涨跌分布采集完成")
         except Exception as e:
             result['market_breadth'] = {}
-            print(f"涨跌分布采集失败: {e}")
+            print(f"[MarketData] 涨跌分布采集失败: {e}")
         
         try:
             result['turnover'] = self.get_turnover()
+            print("[MarketData] 成交额采集完成")
         except Exception as e:
             result['turnover'] = {}
-            print(f"成交额采集失败: {e}")
+            print(f"[MarketData] 成交额采集失败: {e}")
         
         try:
             result['north_flow'] = self.get_north_flow()
+            print("[MarketData] 北向资金采集完成")
         except Exception as e:
             result['north_flow'] = {}
-            print(f"北向资金采集失败: {e}")
+            print(f"[MarketData] 北向资金采集失败: {e}")
         
         try:
             result['news'] = self.get_news(enabled_sources=enabled_sources)
+            print("[MarketData] 快讯采集完成")
         except Exception as e:
             result['news'] = []
-            print(f"快讯采集失败: {e}")
+            print(f"[MarketData] 快讯采集失败: {e}")
         
         # 检查是否需要降级
         if not result['indices'] and not result['market_breadth']:

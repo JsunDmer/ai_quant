@@ -857,8 +857,12 @@ def collect_all_news(limit: int = 20, enabled_sources: List[str] = None) -> List
     Returns:
         [{title, content, time, source, url}, ...]
     """
+    sources_str = ', '.join(enabled_sources) if enabled_sources else '全部'
+    print(f"[NewsCollector] 开始采集新闻，来源: {sources_str}")
+    
     all_news = []
     _g = globals()
+    source_counts = {}
 
     for name in ALL_SOURCE_NAMES:
         if enabled_sources is not None and name not in enabled_sources:
@@ -867,9 +871,14 @@ def collect_all_news(limit: int = 20, enabled_sources: List[str] = None) -> List
         try:
             items = fetcher()
             all_news.extend(items)
+            source_counts[name] = len(items)
         except Exception as e:
             print(f"[NewsCollector] {name} 采集异常: {e}")
             traceback.print_exc()
+            source_counts[name] = 0
+
+    for name, count in source_counts.items():
+        print(f"[NewsCollector] {name} 完成，获取 {count} 条")
 
     print(f"[NewsCollector] 合并前总计 {len(all_news)} 条")
 
@@ -880,7 +889,7 @@ def collect_all_news(limit: int = 20, enabled_sources: List[str] = None) -> List
         t = item.get('time', '')
         if not t:
             return datetime.min
-        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M',
+        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S',
                     '%Y/%m/%d %H:%M:%S', '%Y-%m-%d'):
             try:
                 return datetime.strptime(t[:19], fmt)
@@ -889,7 +898,10 @@ def collect_all_news(limit: int = 20, enabled_sources: List[str] = None) -> List
         return datetime.min
 
     deduped.sort(key=_parse_time, reverse=True)
-
+    
+    final_count = len(deduped[:limit])
+    print(f"[NewsCollector] 新闻采集完成，共 {final_count} 条")
+    
     return deduped[:limit]
 
 

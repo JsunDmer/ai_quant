@@ -21,17 +21,16 @@ class SectorData:
         # 优先尝试同花顺数据源（更稳定）
         sectors = self._get_sector_list_ths()
         if sectors:
-            print(f"[SectorData] 使用同花顺数据源，获取 {len(sectors)} 个板块")
+            print(f"[SectorData] 获取板块列表完成，共 {len(sectors)} 个")
             return sectors
 
         # 备选：东方财富数据源
-        print("[SectorData] 同花顺数据源失败，尝试东方财富...")
         sectors = self._get_sector_list_em()
         if sectors:
-            print(f"[SectorData] 使用东方财富数据源，获取 {len(sectors)} 个板块")
+            print(f"[SectorData] 获取板块列表完成，共 {len(sectors)} 个")
             return sectors
 
-        print("[SectorData] 所有数据源都失败，返回空列表")
+        print("[SectorData] 获取板块列表完成，共 0 个")
         return []
 
     def _get_sector_list_ths(self) -> List[Dict[str, Any]]:
@@ -93,7 +92,7 @@ class SectorData:
         # 1. 查缓存
         cached = self._db.get_sector_stocks(sector_name, trade_date)
         if cached:
-            print(f"[SectorData] {sector_name} 使用缓存 ({len(cached)}只, {trade_date})")
+            print(f"[SectorData] {sector_name} 使用缓存 ({len(cached)}只)")
             return [
                 {'code': s.stock_code, 'name': s.stock_name,
                  'price': s.price, 'change': s.change_pct}
@@ -101,13 +100,14 @@ class SectorData:
             ]
 
         # 2. 从 akshare 拉取
+        print(f"[SectorData] 从API获取 {sector_name} 成分股...")
         stocks = self._fetch_sector_stocks_from_api(sector_name)
 
         # 3. 存入缓存
         if stocks:
             self._db.save_sector_stocks(sector_name, trade_date, stocks)
-            print(f"[SectorData] {sector_name} 已缓存 {len(stocks)} 只个股")
 
+        print(f"[SectorData] {sector_name} 成分股 {len(stocks)} 只")
         return stocks
 
     def get_sector_stocks_with_history(self, sector_name: str) -> List[Dict[str, Any]]:
@@ -193,12 +193,14 @@ class SectorData:
                 r = row.iloc[0]
                 inflow_col = next((c for c in r.index if '主力净流入' in c and '净额' in c), None)
                 pct_col = next((c for c in r.index if '主力净流入' in c and '净占比' in c), None)
-                return {
+                result = {
                     'main_inflow': float(r[inflow_col]) if inflow_col else 0,
                     'main_inflow_pct': float(r[pct_col]) if pct_col else 0
                 }
+                print(f"[SectorData] {sector_name} 资金净流入: {result['main_inflow']:.2f}万")
+                return result
         except Exception as e:
-            print(f"获取板块资金流向失败: {e}")
+            print(f"[SectorData] 获取板块资金流向失败: {e}")
         return {'main_inflow': 0, 'main_inflow_pct': 0}
 
     def score_sector(self, sector_name: str) -> Dict[str, Any]:
