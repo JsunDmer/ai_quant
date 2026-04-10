@@ -159,7 +159,6 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
     else:
         print("[Pipeline Step 2/3] AI新闻生成 (OpenCode)...")
         try:
-            # 使用 subprocess 调用 CLI 脚本
             import subprocess
             cli_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli_ai_analysis.py")
             proc = subprocess.run(
@@ -169,7 +168,9 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
             if proc.returncode == 0:
                 print("[Pipeline] AI新闻生成完成 (OpenCode)")
             else:
-                print(f"[Pipeline] AI新闻生成失败: {proc.stderr[:200]}")
+                print(f"[Pipeline] AI新闻生成失败:")
+                print(f"  STDERR: {proc.stderr[:500]}")
+                print(f"  STDOUT: {proc.stdout[-1000:]}")
                 result['errors'].append(f'ai_news_generation: {proc.stderr[:100]}')
         except subprocess.TimeoutExpired:
             result['errors'].append('ai_news_generation: timeout')
@@ -195,7 +196,9 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
             if proc.returncode == 0:
                 print("[Pipeline] AI板块分析完成 (OpenCode)")
             else:
-                print(f"[Pipeline] AI板块分析失败: {proc.stderr[:200]}")
+                print(f"[Pipeline] AI板块分析失败:")
+                print(f"  STDERR: {proc.stderr[:500]}")
+                print(f"  STDOUT: {proc.stdout[-1000:]}")
                 result['errors'].append(f'ai_sector_analysis: {proc.stderr[:100]}')
         except subprocess.TimeoutExpired:
             result['errors'].append('ai_sector_analysis: timeout')

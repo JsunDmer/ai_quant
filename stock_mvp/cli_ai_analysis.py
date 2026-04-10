@@ -26,43 +26,62 @@ from data.sector_data import sector_data
 
 def call_opencode(prompt: str) -> str:
     """调用OpenCode CLI执行分析"""
+    print(f"[OpenCode] 开始调用 opencode run...")
     try:
         result = subprocess.run(
             ["opencode", "run", "--format", "json", prompt],
             capture_output=True, text=True, timeout=120
         )
+        print(f"[OpenCode] 返回码: {result.returncode}")
+        
         if result.returncode != 0:
+            print(f"[OpenCode] 调用失败，STDERR: {result.stderr[:500]}")
             return f"ERROR: {result.stderr}"
         
         import json
         text_content = ''
+        json_lines = 0
         for line in result.stdout.strip().split('\n'):
+            if not line.strip():
+                continue
+            json_lines += 1
             try:
                 event = json.loads(line)
                 if event.get('type') == 'text':
                     text_content = event.get('part', {}).get('text', '')
+                    print(f"[OpenCode] 收到文本响应，长度: {len(text_content)}")
                     break
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                print(f"[OpenCode] JSON解析行 {json_lines} 失败: {e}")
                 continue
         
         if not text_content:
+            print(f"[OpenCode] 无文本响应，共解析 {json_lines} 行")
             return "ERROR: no text in response"
         
         import re
         match = re.search(r'```json\s*(.*?)\s*```', text_content, re.DOTALL)
         if match:
-            return match.group(1)
+            json_str = match.group(1)
+            print(f"[OpenCode] 从markdown提取JSON，长度: {len(json_str)}")
+            return json_str
         
         match = re.search(r'\[.*\]', text_content, re.DOTALL)
         if match:
-            return match.group(0)
+            json_str = match.group(0)
+            print(f"[OpenCode] 从文本提取JSON数组，长度: {len(json_str)}")
+            return json_str
         
+        print(f"[OpenCode] 返回原始文本，长度: {len(text_content)}")
         return text_content
     except subprocess.TimeoutExpired:
+        print("[OpenCode] 调用超时 (120s)")
         return "ERROR: timeout after 120s"
     except FileNotFoundError:
+        print("[OpenCode] opencode 命令未找到")
         return "ERROR: opencode command not found"
     except Exception as e:
+        print(f"[OpenCode] 调用异常: {e}")
         return f"ERROR: {str(e)}"
 
 
