@@ -13,6 +13,7 @@ CLI 用法:
     python -m pipeline run-post-close  # 使用当天或最近交易日
 """
 import json
+import os
 import click
 import importlib
 from datetime import datetime, timedelta
