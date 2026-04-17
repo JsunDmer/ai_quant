@@ -1,20 +1,20 @@
 """
 AI Sector Analyzer - AI板块分析服务
-基于AI生成的新闻，分析各板块的涨跌趋势
 """
 import json
+import asyncio
+import requests
 from typing import List, Dict, Any
 
-from openai import OpenAI
-
+import os
 from config import config
 from db import AISectorAnalysis, db
 
+def _use_opencode_mode():
+    return os.getenv("LLM_MODE", "") == "opencode"
+
 
 class AISectorAnalyzer:
-    """AI板块分析器 - 基于新闻分析板块涨跌"""
-    
-    # 主要板块列表
     MAIN_SECTORS = [
         "科技", "新能源", "医药", "消费", "金融", "地产",
         "军工", "芯片", "人工智能", "半导体", "光伏", "储能",
@@ -22,82 +22,64 @@ class AISectorAnalyzer:
         "建材", "有色", "煤炭", "石油", "电力", "钢铁",
         "化工", "机械", "交通运输", "传媒", "电子", "计算机"
     ]
-    
+
     def __init__(self):
-        """初始化OpenAI客户端"""
-        self.client = OpenAI(
-            api_key=config.LLM_API_KEY,
-            base_url=config.LLM_BASE_URL
-        )
-        self.model = config.LLM_MODEL
-    
+        self._use_opencode = _use_opencode_mode()
+        if not self._use_opencode:
+            from openai import OpenAI
+            self.client = OpenAI(
+                api_key=config.LLM_API_KEY,
+                base_url=config.LLM_BASE_URL
+            )
+            self.model = config.LLM_MODEL
+
     def analyze_sectors(self, ai_news_list: List[Dict], sector_names: List[str] = None) -> Dict[str, Any]:
-        """
-        基于AI新闻分析板块
+        if self._use_opencode:
+            return self._analyze_opencode(ai_news_list, sector_names)
+        return self._analyze_openai(ai_news_list, sector_names)
 
-        Args:
-            ai_news_list: AI生成的新闻列表
-            sector_names: 动态板块名列表（来自AKShare），None时使用MAIN_SECTORS
-
-        Returns:
-            {
-                "sector_analysis": [...],
-                "market_overview": "...",
-                "hot_sectors": [...]
-            }
-        """
-        if not ai_news_list:
-            return {"sector_analysis": [], "market_overview": "", "hot_sectors": []}
-
-        prompt = self._build_prompt(ai_news_list, sector_names=sector_names)
-        result = self._call_llm(prompt)
-        
+    def _analyze_opencode(self, ai_news_list: List[Dict], sector_names: List[str] = None) -> Dict[str, Any]:
         try:
-            # 处理 Markdown 代码块
-            if result:
-                result = result.strip()
-                if result.startswith('```json'):
-                    result = result[7:]
-                elif result.startswith('```'):
-                    result = result[3:]
-                if result.endswith('```'):
-                    result = result[:-3]
-                result = result.strip()
-            
-            analysis = json.loads(result)
-            return analysis
-        except (json.JSONDecodeError, TypeError) as e:
-            print(f"[AI Sector Analyzer] JSON解析失败: {e}")
-            return {"sector_analysis": [], "market_overview": "", "hot_sectors": []}
-    
+            prompt = self._build_prompt(ai_news_list, sector_names)
+            server_url = config.OPENCODE_SERVER_URL
+            resp = requests.post(
+                f"{server_url}/session",
+                json={"title": "sector-analysis"},
+                timeout=30
+            )
+            if resp.status_code != 200:
+                return {"sector_analysis": [], "market_overview": "解析失败", "hot_sectors": []}
+            session = resp.json()
+            session_id = session.get("id")
+            if not session_id:
+                return {"sector_analysis": [], "market_overview": "解析失败", "hot_sectors": []}
+            msg_resp = requests.post(
+                f"{server_url}/session/{session_id}/message",
+                json={"parts": [{"type": "text", "text": prompt}]},
+                timeout=60
+            )
+            if msg_resp.status_code != 200:
+                return {"sector_analysis": [], "market_overview": "解析失败", "hot_sectors": []}
+            result_data = msg_resp.json()
+            result = ""
+            for part in result_data.get("parts", []):
+                if part.get("type") == "text":
+                    result += part.get("text", "")
+            return self._parse_result(result)
+        except Exception as e:
+            print(f"[AISectorAnalyzer] OpenCode调用失败: {e}")
+            return {"sector_analysis": [], "market_overview": "解析失败", "hot_sectors": []}
+
+    def _analyze_openai(self, ai_news_list: List[Dict], sector_names: List[str] = None) -> Dict[str, Any]:
+        prompt = self._build_prompt(ai_news_list, sector_names)
+        result = self._call_llm(prompt)
+        return self._parse_result(result)
+
     def _build_prompt(self, ai_news_list: List[Dict], sector_names: List[str] = None) -> str:
-        """构建板块分析提示词"""
-
-        # 确定板块列表
-        sectors_pool = sector_names if sector_names else self.MAIN_SECTORS
-        sector_list_text = "、".join(sectors_pool[:100])  # 限制长度
-
-        # 格式化新闻列表
-        news_text = ""
-        for i, news in enumerate(ai_news_list):
-            title = news.get('title', '')
-            summary = news.get('summary', '')
-            category = news.get('category', '')
-            sentiment = news.get('sentiment', 'neutral')
-            sectors = news.get('related_sectors_json', '[]')
-            try:
-                sectors = json.loads(sectors) if isinstance(sectors, str) else sectors
-            except:
-                sectors = []
-
-            news_text += f"""
-{i+1}. 【{title}】
-   简介: {summary}
-   分类: {category} | 情绪: {sentiment}
-   相关板块: {', '.join(sectors) if sectors else '无'}
-"""
-
-        prompt = f"""你是一位专业的A股板块分析师。请基于今日新闻，分析各板块的涨跌趋势。
+        sectors = sector_names or self.MAIN_SECTORS
+        sector_list_text = ", ".join(sectors[:15])
+        news_text = json.dumps(ai_news_list[:10], ensure_ascii=False)[:2000]
+        return f"""你是一位专业的A股板块分析师。请基于今日新闻，分析各板块的涨跌趋势。
 
 【今日新闻】
 {news_text}
@@ -127,10 +109,8 @@ class AISectorAnalyzer:
 5. 只分析有新闻支撑的板块，不要凭空捏造
 6. 输出必须是合法的JSON格式
 7. 板块名称必须从以下列表中选择: {sector_list_text}"""
-        return prompt
-    
+
     def _call_llm(self, prompt: str) -> str:
-        """调用LLM"""
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -141,24 +121,30 @@ class AISectorAnalyzer:
                 temperature=0.7,
                 max_tokens=4000
             )
-            
-            # 处理不同的返回格式
             if hasattr(response, 'choices'):
                 return response.choices[0].message.content
-            elif isinstance(response, str):
-                return response
-            else:
-                return str(response)
-                
+            return str(response)
         except Exception as e:
             print(f"[AI Sector Analyzer] LLM调用失败: {e}")
             raise
-    
+
+    def _parse_result(self, result: str) -> Dict[str, Any]:
+        try:
+            result = result.strip()
+            if result.startswith('```json'):
+                result = result[7:]
+            elif result.startswith('```'):
+                result = result[3:]
+            if result.endswith('```'):
+                result = result[:-3]
+            return json.loads(result.strip())
+        except json.JSONDecodeError:
+            print(f"[AI Sector Analyzer] JSON解析失败: {result[:200]}")
+            return {"sector_analysis": [], "market_overview": "解析失败", "hot_sectors": []}
+
     def save_to_db(self, trade_date: str, analysis: Dict[str, Any]) -> bool:
-        """保存分析结果到数据库"""
         try:
             sector_analysis = analysis.get('sector_analysis', [])
-            
             for sector_data in sector_analysis:
                 ai_sector = AISectorAnalysis(
                     trade_date=trade_date,
@@ -167,16 +153,13 @@ class AISectorAnalyzer:
                     confidence=sector_data.get('confidence', 5),
                     score_up=sector_data.get('score_up', 50),
                     score_down=sector_data.get('score_down', 50),
-                    reasons_json=json.dumps(sector_data.get('reasons', []), ensure_ascii=False),
-                    related_news_json=json.dumps(sector_data.get('related_news_indices', []), ensure_ascii=False)
+                    reasons=";".join(sector_data.get('reasons', [])),
+                    related_news_indices=",".join(map(str, sector_data.get('related_news_indices', [])))
                 )
-                db.upsert_ai_sector_analysis(ai_sector)
-            
+                db.session.add(ai_sector)
+            db.session.commit()
             return True
         except Exception as e:
-            print(f"保存板块分析失败: {e}")
+            print(f"[AI Sector Analyzer] 保存失败: {e}")
+            db.session.rollback()
             return False
-
-
-# 模块级实例
-ai_sector_analyzer = AISectorAnalyzer()

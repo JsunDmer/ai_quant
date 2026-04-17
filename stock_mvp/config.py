@@ -12,10 +12,16 @@ load_dotenv()
 class Config:
     """应用配置"""
     
-    # LLM API 配置 (支持 OpenAI 兼容接口)
+    # LLM 模式选择
+    LLM_MODE: str = os.getenv("LLM_MODE", "openai")  # "openai" 或 "opencode"
+    
+    # OpenAI 兼容接口配置
     LLM_API_KEY: str = os.getenv("LLM_API_KEY", os.getenv("DEEPSEEK_API_KEY", ""))
     LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))
     LLM_MODEL: str = os.getenv("LLM_MODEL", os.getenv("DEEPSEEK_MODEL", "deepseek-chat"))
+    
+    # OpenCode 服务器配置
+    OPENCODE_SERVER_URL: str = os.getenv("OPENCODE_SERVER_URL", "http://localhost:63424")
     
     # 兼容旧配置
     DEEPSEEK_API_KEY: str = LLM_API_KEY
