@@ -4,6 +4,10 @@
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 import pandas as pd
+
+from data import akshare_patch
+
+akshare_patch.patch()
 import akshare as ak
 import time
 
@@ -19,21 +23,27 @@ class MarketData:
     def _get_spot_data(self) -> pd.DataFrame:
         now = time.time()
         if self._spot_cache is None or (now - self._spot_cache_time) > self._cache_duration:
-            self._spot_cache = ak.stock_zh_a_spot_em()
+            try:
+                self._spot_cache = ak.stock_zh_a_spot_em()
+            except Exception:
+                try:
+                    self._spot_cache = ak.stock_zh_a_spot()
+                except Exception as e:
+                    print(f"[MarketData] 获取实时行情失败: {e}")
+                    self._spot_cache = pd.DataFrame()
             self._spot_cache_time = now
         return self._spot_cache
     
     def get_indices(self) -> List[Dict[str, Any]]:
-        """获取大盘指数"""
         try:
             df = ak.stock_zh_index_spot_sina()
             indices = []
-            for code in ['000001', '399001', '399006', '000688', '000300', '000905', '000852']:
+            for code in ['sh000001', 'sz399001', 'sz399006', 'sh000688', 'sh000300', 'sh000905', 'sh000852']:
                 row = df[df['代码'] == code]
                 if not row.empty:
                     r = row.iloc[0]
                     indices.append({
-                        'code': code,
+                        'code': code.replace('sh', '').replace('sz', ''),
                         'name': r['名称'],
                         'price': float(r['最新价']) if pd.notna(r['最新价']) else 0,
                         'change': float(r['涨跌幅']) if pd.notna(r['涨跌幅']) else 0

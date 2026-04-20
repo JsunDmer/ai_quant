@@ -2,89 +2,113 @@
 AI News Generator - 生成结构化财经新闻摘要
 """
 import json
-import os
-import asyncio
-import requests
 from typing import List, Dict
+
+from openai import OpenAI
 
 from config import config
 from db import AINews, db
 
-def _use_opencode_mode():
-    return os.getenv("LLM_MODE", "") == "opencode"
-
 
 class AINewsGenerator:
+    """AI财经新闻生成器 - 将原始新闻转换为结构化摘要"""
+
     def __init__(self):
-        self._use_opencode = _use_opencode_mode()
-        if not self._use_opencode:
-            from openai import OpenAI
-            self.client = OpenAI(
-                api_key=config.LLM_API_KEY,
-                base_url=config.LLM_BASE_URL
-            )
-            self.model = config.LLM_MODEL
+        """初始化OpenAI客户端"""
+        self.client = OpenAI(
+            api_key=config.LLM_API_KEY,
+            base_url=config.LLM_BASE_URL
+        )
+        self.model = config.LLM_MODEL
 
     def generate_structured_news(self, raw_news: List[Dict]) -> List[Dict]:
-        if self._use_opencode:
-            return self._generate_opencode(raw_news)
-        return self._generate_openai(raw_news)
+        """
+        核心方法：生成结构化新闻
 
-    def _generate_opencode(self, raw_news: List[Dict]) -> List[Dict]:
-        try:
-            prompt = self._build_prompt(raw_news)
-            server_url = config.OPENCODE_SERVER_URL
-            resp = requests.post(
-                f"{server_url}/session",
-                json={"title": "news-analysis"},
-                timeout=30
-            )
-            if resp.status_code != 200:
-                return []
-            session = resp.json()
-            session_id = session.get("id")
-            if not session_id:
-                return []
-            msg_resp = requests.post(
-                f"{server_url}/session/{session_id}/message",
-                json={"parts": [{"type": "text", "text": prompt}]},
-                timeout=60
-            )
-            if msg_resp.status_code != 200:
-                return []
-            result_data = msg_resp.json()
-            result = ""
-            for part in result_data.get("parts", []):
-                if part.get("type") == "text":
-                    result += part.get("text", "")
-            return self._parse_result(result, raw_news)
-        except Exception as e:
-            print(f"[AINewsGenerator] OpenCode调用失败: {e}")
+        Args:
+            raw_news: 原始新闻列表
+
+        Returns:
+            结构化新闻列表
+        """
+        if not raw_news:
             return []
 
-    def _generate_openai(self, raw_news: List[Dict]) -> List[Dict]:
         prompt = self._build_prompt(raw_news)
         result = self._call_llm(prompt)
-        return self._parse_result(result, raw_news)
+
+        try:
+            # 处理 Markdown 代码块
+            if result:
+                # 移除 ```json 和 ``` 标记
+                result = result.strip()
+                if result.startswith('```json'):
+                    result = result[7:]
+                elif result.startswith('```'):
+                    result = result[3:]
+                if result.endswith('```'):
+                    result = result[:-3]
+                result = result.strip()
+            
+            structured_news = json.loads(result)
+            return structured_news if isinstance(structured_news, list) else []
+        except (json.JSONDecodeError, TypeError) as e:
+            print(f"[AI News Generator] JSON解析失败: {e}")
+            return []
 
     def _build_prompt(self, raw_news: List[Dict]) -> str:
-        news_json = json.dumps(raw_news[:10], ensure_ascii=False, indent=2)
-        return f"""请分析以下财经新闻，提取关键信息并返回结构化数据。
+        """
+        构建提示词
 
-新闻列表:
-{news_json}
+        Args:
+            raw_news: 原始新闻列表
 
-请返回JSON数组格式，每条新闻包含:
-- title: 标题
-- summary: 摘要 (50字以内)
-- sentiment: 情绪 (positive/neutral/negative)
-- keywords: 关键词 (最多5个)
-- related_sectors: 关联板块
-- importance: 重要性 (1-5)
+        Returns:
+            提示词字符串
+        """
+        news_text = "\n".join([
+            f"{i+1}. [标题] {news.get('title', '')} [来源] {news.get('source', '')} [链接] {news.get('url', '')} [内容] {news.get('content', news.get('summary', ''))}"
+            for i, news in enumerate(raw_news)
+        ])
 
-直接返回JSON数组，不要其他说明。"""
+        prompt = f"""你是一位专业的财经新闻分析师。请根据以下原始新闻信息，生成结构化的新闻摘要。
+
+【原始新闻】
+{news_text}
+
+请以JSON数组格式输出：
+[
+    {{
+        "title": "新闻标题（精简概括）",
+        "summary": "50-100字的新闻简介，包含具体数据和影响分析",
+        "category": "宏观/行业/公司/政策/国际/科技",
+        "sentiment": "positive/negative/neutral",
+        "keywords": ["关键词1", "关键词2", "关键词3"],
+        "importance": 8,
+        "related_sectors": ["板块1", "板块2"],
+        "source_url": "原始新闻链接（从原文中保留）",
+        "source": "新闻来源名称"
+    }}
+]
+
+要求：
+1. 每条新闻简介必须包含具体数据和影响分析
+2. 关键词提取要精准，适合做词云展示，每个关键词2-4个字
+3. 板块关联要准确
+4. source_url必须从原始新闻中保留，不要编造链接
+5. importance取值1-10，数值越大越重要"""
+        return prompt
 
     def _call_llm(self, prompt: str) -> str:
+        """
+        调用LLM
+
+        Args:
+            prompt: 提示词
+
+        Returns:
+            LLM返回的JSON字符串
+        """
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -95,40 +119,50 @@ class AINewsGenerator:
                 temperature=0.7,
                 max_tokens=4000
             )
+            
+            # 处理不同的返回格式
             if hasattr(response, 'choices'):
                 return response.choices[0].message.content
-            return str(response)
+            elif isinstance(response, str):
+                return response
+            else:
+                return str(response)
+                
         except Exception as e:
-            print(f"[AINewsGenerator] LLM调用失败: {e}")
-            return "[]"
+            print(f"[AI News Generator] LLM调用失败: {e}")
+            raise
 
-    def _parse_result(self, result: str, raw_news: List[Dict]) -> List[Dict]:
+    def save_to_db(self, trade_date: str, structured_news: List[Dict]) -> bool:
+        """
+        保存到数据库
+
+        Args:
+            trade_date: 交易日期
+            structured_news: 结构化新闻列表
+
+        Returns:
+            是否保存成功
+        """
         try:
-            result = result.strip()
-            if result.startswith('```json'):
-                result = result[7:]
-            elif result.startswith('```'):
-                result = result[3:]
-            if result.endswith('```'):
-                result = result[:-3]
-            data = json.loads(result.strip())
-            if not isinstance(data, list):
-                data = [data]
-            return data
-        except json.JSONDecodeError:
-            print(f"[AINewsGenerator] JSON解析失败: {result[:100]}")
-            return []
+            for news in structured_news:
+                ai_news = AINews(
+                    trade_date=trade_date,
+                    title=news.get("title", ""),
+                    summary=news.get("summary", ""),
+                    category=news.get("category", ""),
+                    sentiment=news.get("sentiment", "neutral"),
+                    keywords_json=json.dumps(news.get("keywords", []), ensure_ascii=False),
+                    importance=news.get("importance", 5),
+                    related_sectors_json=json.dumps(news.get("related_sectors", []), ensure_ascii=False),
+                    source_url=news.get("source_url", ""),
+                )
+                db.upsert_ai_news(ai_news)
 
-    def save_to_db(self, structured_news: List[Dict], trade_date: str):
-        for item in structured_news:
-            news = AINews(
-                trade_date=trade_date,
-                title=item.get("title", ""),
-                summary=item.get("summary", ""),
-                sentiment=item.get("sentiment", "neutral"),
-                keywords=",".join(item.get("keywords", [])),
-                related_sectors=",".join(item.get("related_sectors", [])),
-                importance=item.get("importance", 3),
-            )
-            db.session.add(news)
-        db.session.commit()
+            return True
+        except Exception as e:
+            print(f"保存新闻失败: {e}")
+            return False
+
+
+# 模块级实例
+ai_news_generator = AINewsGenerator()

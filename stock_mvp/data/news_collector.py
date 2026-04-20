@@ -27,16 +27,16 @@ from openai import OpenAI
 
 from config import config
 
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="duckduckgo_search")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="akshare")
+
 # DuckDuckGo 搜索 - 可选依赖
 try:
     from ddgs import DDGS
     HAS_DDGS = True
 except ImportError:
-    try:
-        from duckduckgo_search import DDGS
-        HAS_DDGS = True
-    except ImportError:
-        HAS_DDGS = False
+    HAS_DDGS = False
 
 # BeautifulSoup - 可选依赖 (用于 HTML 解析源)
 try:

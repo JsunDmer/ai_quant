@@ -4,6 +4,10 @@
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import time
+
+from data import akshare_patch
+
+akshare_patch.patch()
 import akshare as ak
 import pandas as pd
 
@@ -183,21 +187,15 @@ class SectorData:
         return []
 
     def get_sector_fund_flow(self, sector_name: str) -> Dict[str, Any]:
-        """获取板块资金流向"""
         try:
-            df = ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")
-            # 兼容新旧字段名
-            name_col = '名称' if '名称' in df.columns else '板块名称'
-            row = df[df[name_col] == sector_name]
+            df = ak.stock_fund_flow_industry()
+            row = df[df['行业'] == sector_name]
             if not row.empty:
                 r = row.iloc[0]
-                inflow_col = next((c for c in r.index if '主力净流入' in c and '净额' in c), None)
-                pct_col = next((c for c in r.index if '主力净流入' in c and '净占比' in c), None)
-                result = {
-                    'main_inflow': float(r[inflow_col]) if inflow_col else 0,
-                    'main_inflow_pct': float(r[pct_col]) if pct_col else 0
-                }
-                print(f"[SectorData] {sector_name} 资金净流入: {result['main_inflow']:.2f}万")
+                inflow = float(r['净额']) if pd.notna(r.get('净额')) else 0
+                pct = float(r.get('行业-涨跌幅', 0)) or 0
+                result = {'main_inflow': inflow * 10000, 'main_inflow_pct': pct}
+                print(f"[SectorData] {sector_name} 资金净流入: {inflow:.2f}亿")
                 return result
         except Exception as e:
             print(f"[SectorData] 获取板块资金流向失败: {e}")

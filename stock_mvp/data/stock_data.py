@@ -5,6 +5,10 @@
 from typing import List, Optional, Dict, Any, cast
 from datetime import datetime, timedelta
 import importlib
+
+from data import akshare_patch
+
+akshare_patch.patch()
 import akshare as ak
 import pandas as pd
 import time

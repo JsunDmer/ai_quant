@@ -3,9 +3,8 @@
 
 功能:
 - 市场快照采集
-- AI新闻生成
-- AI板块分析
 - 板块评分与推荐
+- 个股信号生成
 - 数据持久化存储
 
 CLI 用法:
@@ -13,7 +12,6 @@ CLI 用法:
     python -m pipeline run-post-close  # 使用当天或最近交易日
 """
 import json
-import os
 import click
 import importlib
 from datetime import datetime, timedelta
@@ -24,8 +22,9 @@ akshare_patch.patch()
 
 from data.market_data import MarketData
 from data.sector_data import SectorData
-
-from db import Database, MarketSnapshot, SectorRecommendation, AINews, AISectorAnalysis, SectorDailyPerformance
+from strategy.quant_strategy import QuantStrategy
+from data.stock_data import StockData
+from db import Database, MarketSnapshot, SectorRecommendation, StockSignal, AINews, AISectorAnalysis, SectorDailyPerformance
 
 
 # 交易日判断：简单排除周末
@@ -100,10 +99,12 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
     # 初始化模块
     market = MarketData()
     sector = SectorData()
+    strategy = QuantStrategy()
+    stock_db = StockData()
     db = Database()
     
-    # Step 1: 市场快照采集
-    print("[Pipeline Step 1/3] 采集市场快照...")
+    # Step 2: 市场快照采集
+    print("[Pipeline Step 1/5] 采集市场快照...")
     try:
         snapshot = market.collect_post_close_snapshot(trade_date, enabled_sources=enabled_sources or [])
         result['market_snapshot'] = snapshot
@@ -153,62 +154,83 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
     # Step 2: AI新闻生成
     structured_news = []
     if refresh_realtime_only:
-        print("[Pipeline Step 2/3] 仅更新实时数据模式，跳过AI新闻生成")
+        print("[Pipeline Step 2/6] 仅更新实时数据模式，跳过AI新闻生成")
     elif not ai_enabled:
-        print("[Pipeline Step 2/3] AI分析已关闭，跳过AI新闻生成")
+        print("[Pipeline Step 2/6] AI分析已关闭，跳过AI新闻生成")
     else:
-        print("[Pipeline Step 2/3] AI新闻生成 (OpenCode)...")
+        print("[Pipeline Step 2/6] AI新闻生成...")
         try:
-            import subprocess
-            cli_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli_ai_analysis.py")
-            proc = subprocess.run(
-                ["python", cli_path, trade_date, "2"],
-                capture_output=True, text=True, timeout=300
-            )
-            if proc.returncode == 0:
-                print("[Pipeline] AI新闻生成完成 (OpenCode)")
+            # 获取原始新闻
+            news = []
+            try:
+                snapshot = result.get('market_snapshot')
+                if snapshot:
+                    news = snapshot.get('news', [])
+            except:
+                pass
+
+            if news:
+                from ai.news_generator import ai_news_generator
+
+                # 生成结构化新闻
+                structured_news = ai_news_generator.generate_structured_news(news)
+
+                if structured_news:
+                    # 保存到数据库
+                    ai_news_generator.save_to_db(trade_date, structured_news)
+                    print(f"[Pipeline] AI新闻已生成，共 {len(structured_news)} 条")
+                else:
+                    print("[Pipeline] AI新闻生成返回空结果")
             else:
-                print(f"[Pipeline] AI新闻生成失败:")
-                print(f"  STDERR: {proc.stderr[:500]}")
-                print(f"  STDOUT: {proc.stdout[-1000:]}")
-                result['errors'].append(f'ai_news_generation: {proc.stderr[:100]}')
-        except subprocess.TimeoutExpired:
-            result['errors'].append('ai_news_generation: timeout')
-            print("[Pipeline] AI新闻生成超时")
+                print("[Pipeline] 无原始新闻，跳过AI新闻生成")
+
         except Exception as e:
             result['errors'].append(f'ai_news_generation: {str(e)}')
             print(f"[Pipeline] AI新闻生成失败: {e}")
 
     # Step 3: AI板块分析
     if refresh_realtime_only:
-        print("[Pipeline Step 3/3] 仅更新实时数据模式，跳过AI板块分析")
+        print("[Pipeline Step 3/7] 仅更新实时数据模式，跳过AI板块分析")
     elif not ai_enabled:
-        print("[Pipeline Step 3/3] AI分析已关闭，跳过AI板块分析")
+        print("[Pipeline Step 3/7] AI分析已关闭，跳过AI板块分析")
     else:
-        print("[Pipeline Step 3/3] AI板块分析 (OpenCode)...")
+        print("[Pipeline Step 3/7] AI板块分析...")
         try:
-            import subprocess
-            cli_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli_ai_analysis.py")
-            proc = subprocess.run(
-                ["python", cli_path, trade_date, "3"],
-                capture_output=True, text=True, timeout=300
-            )
-            if proc.returncode == 0:
-                print("[Pipeline] AI板块分析完成 (OpenCode)")
+            # 从数据库获取AI生成的新闻
+            ai_news_records = db.get_ai_news(trade_date)
+
+            if ai_news_records:
+                # 转换为dict格式
+                ai_news_list = []
+                for news in ai_news_records:
+                    ai_news_list.append({
+                        'title': news.title,
+                        'summary': news.summary,
+                        'category': news.category,
+                        'sentiment': news.sentiment,
+                        'keywords_json': news.keywords_json,
+                        'related_sectors_json': news.related_sectors_json
+                    })
+
+                # 调用AI板块分析（传入板块名列表，确保AI只从真实板块中选择）
+                from ai.sector_analyzer import ai_sector_analyzer
+                sector_names = [s['name'] for s in sector_list] if sector_list else []
+                sector_analysis = ai_sector_analyzer.analyze_sectors(ai_news_list, sector_names=sector_names)
+
+                if sector_analysis.get('sector_analysis'):
+                    ai_sector_analyzer.save_to_db(trade_date, sector_analysis)
+                    print(f"[Pipeline] AI板块分析完成，分析了 {len(sector_analysis['sector_analysis'])} 个板块")
+                else:
+                    print("[Pipeline] AI板块分析返回空结果")
             else:
-                print(f"[Pipeline] AI板块分析失败:")
-                print(f"  STDERR: {proc.stderr[:500]}")
-                print(f"  STDOUT: {proc.stdout[-1000:]}")
-                result['errors'].append(f'ai_sector_analysis: {proc.stderr[:100]}')
-        except subprocess.TimeoutExpired:
-            result['errors'].append('ai_sector_analysis: timeout')
-            print("[Pipeline] AI板块分析超时")
+                print("[Pipeline] 无AI新闻数据，跳过AI板块分析")
+
         except Exception as e:
             result['errors'].append(f'ai_sector_analysis: {str(e)}')
             print(f"[Pipeline] AI板块分析失败: {e}")
     
-    # Step 3: 板块评分与推荐
-    print("[Pipeline Step 3/3] 板块评分与推荐...")
+    # Step 4: 板块评分与推荐
+    print("[Pipeline Step 3/6] 板块评分与推荐...")
     try:
         sector_results = sector.recommend_sectors()
         
@@ -240,6 +262,85 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
         result['errors'].append(f'sector_scoring: {str(e)}')
         result['status'] = 'degraded'
         print(f"[Pipeline] 板块评分失败: {e}")
+    
+    # Step 4: 候选股票筛选
+    print("[Pipeline Step 3/5] 筛选候选股票...")
+    candidate_stocks = []
+    try:
+        # 从强推荐板块中筛选候选
+        strong_recommend = result.get('sector_recommendations', [])
+        strong_sectors = [r['sector_name'] for r in strong_recommend if r['bucket'] == 'strong_recommend'][:5]
+        
+        for sector_name in strong_sectors:
+            try:
+                candidates = sector.pick_candidates_for_sector(sector_name, min_count=3, trade_date=trade_date)
+                for c in candidates:
+                    c['sector_name'] = sector_name
+                candidate_stocks.extend(candidates)
+            except Exception as e:
+                print(f"[Pipeline] 筛选板块 {sector_name} 失败: {e}")
+        
+        print(f"[Pipeline] 候选股票 {len(candidate_stocks)} 只")
+        
+    except Exception as e:
+        result['errors'].append(f'candidate_pick: {str(e)}')
+        result['status'] = 'degraded'
+        print(f"[Pipeline] 候选股票筛选失败: {e}")
+    
+    # Step 5: 信号生成
+    print("[Pipeline Step 4/5] 生成交易信号...")
+    try:
+        signals = []
+        for candidate in candidate_stocks:
+            try:
+                code = candidate['code']
+                name = candidate['name']
+                sector_name = candidate.get('sector_name', '')
+                
+                # 获取K线数据
+                kline = stock_db.get_kline_data(code, 60)
+                if kline.empty or len(kline) < 20:
+                    continue
+                
+                # 技术分析
+                analysis = strategy.analyze_stock(code, kline)
+                
+                # 只保留买入信号
+                if analysis['signal'] in ['strong_buy', 'buy']:
+                    signal_data = {
+                        'stock_code': code,
+                        'stock_name': name,
+                        'sector_name': sector_name,
+                        'signal': analysis['signal'],
+                        'confidence': analysis['confidence'],
+                        'factors': analysis['factors'],
+                        'price': candidate.get('price', 0),
+                        'change': candidate.get('change', 0)
+                    }
+                    signals.append(signal_data)
+                    
+                    # 保存到数据库
+                    db_signal = StockSignal(
+                        trade_date=trade_date,
+                        stock_code=code,
+                        stock_name=name,
+                        sector_name=sector_name,
+                        signal=analysis['signal'],
+                        confidence=analysis['confidence'],
+                        factors_json=json.dumps(analysis['factors'])
+                    )
+                    db.upsert_stock_signal(db_signal)
+                    
+            except Exception as e:
+                print(f"[Pipeline] 分析 {candidate.get('code')} 失败: {e}")
+        
+        result['stock_signals'] = signals
+        print(f"[Pipeline] 买入信号 {len(signals)} 个")
+        
+    except Exception as e:
+        result['errors'].append(f'signal_generation: {str(e)}')
+        result['status'] = 'degraded'
+        print(f"[Pipeline] 信号生成失败: {e}")
 
     summary = {
         "sectors": len(result.get('sector_recommendations', [])),

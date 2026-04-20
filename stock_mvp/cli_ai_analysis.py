@@ -117,8 +117,9 @@ def run_step2_ai_news(trade_date: str, db: Database) -> dict:
     try:
         structured = json.loads(result)
         if structured:
-            from ai.news_generator import ai_news_generator
-            ai_news_generator.save_to_db(trade_date, structured)
+            from ai.news_generator import AINewsGenerator
+            generator = AINewsGenerator()
+            generator.save_to_db(structured, trade_date)
             print(f"[CLI] AI新闻生成完成: {len(structured)} 条")
             return {"step": 2, "status": "ok", "count": len(structured)}
     except json.JSONDecodeError:
@@ -160,8 +161,9 @@ def run_step3_ai_sector(trade_date: str, db: Database) -> dict:
     try:
         analysis = json.loads(result)
         if analysis.get('sector_analysis'):
-            from ai.sector_analyzer import ai_sector_analyzer
-            ai_sector_analyzer.save_to_db(trade_date, analysis)
+            from ai.sector_analyzer import AISectorAnalyzer
+            analyzer = AISectorAnalyzer()
+            analyzer.save_to_db(trade_date, analysis)
             print(f"[CLI] AI板块分析完成: {len(analysis['sector_analysis'])} 个板块")
             return {"step": 3, "status": "ok", "count": len(analysis['sector_analysis'])}
     except json.JSONDecodeError:
