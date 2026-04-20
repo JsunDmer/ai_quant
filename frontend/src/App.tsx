@@ -1,73 +1,31 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
 import './App.css'
-import {
-  applyThemeMode,
-  getStoredThemeMode,
-  setThemeMode,
-  watchSystemTheme,
-  type ThemeMode,
-} from './theme/theme'
+import { AppLayout } from './app/layout/AppLayout'
+import { AppSidebar, type NavKey } from './app/layout/AppSidebar'
+import { MarketPage } from './pages/MarketPage'
+import { SectorsPage } from './pages/SectorsPage'
+import { SignalsPage } from './pages/SignalsPage'
+import { EvaluationPage } from './pages/EvaluationPage'
 
 function App() {
-  const [themeMode, setThemeModeState] = useState<ThemeMode>(() => getStoredThemeMode())
-
-  useEffect(() => {
-    applyThemeMode(themeMode)
-    if (themeMode !== 'system') return
-    return watchSystemTheme(() => applyThemeMode('system'))
-  }, [themeMode])
-
-  const themeLabel = useMemo(() => {
-    if (themeMode === 'light') return '浅色'
-    if (themeMode === 'dark') return '深色'
-    return '系统'
-  }, [themeMode])
-
-  const onChangeTheme = (mode: ThemeMode) => {
-    setThemeMode(mode)
-    setThemeModeState(mode)
-  }
+  const [active, setActive] = useState<NavKey>('market')
+  const [marketRefreshKey, setMarketRefreshKey] = useState(0)
 
   return (
-    <>
-      <div style={{ padding: 24 }}>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontWeight: 600 }}>股民间投资助手（React）</div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>主题：{themeLabel}</span>
-            <select
-              value={themeMode}
-              onChange={(e) => onChangeTheme(e.target.value as ThemeMode)}
-              style={{
-                background: 'var(--bg-card)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 6,
-                padding: '6px 8px',
-              }}
-            >
-              <option value="system">系统</option>
-              <option value="light">浅色</option>
-              <option value="dark">深色</option>
-            </select>
-          </div>
-        </div>
-
-        <div
-          style={{
-            marginTop: 16,
-            padding: 16,
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 8,
-          }}
-        >
-          <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-            前端工程已初始化。下一步会接入侧边栏导航、API 拉取与 ECharts。
-          </div>
-        </div>
-      </div>
-    </>
+    <AppLayout
+      sidebar={
+        <AppSidebar
+          active={active}
+          onNavigate={setActive}
+          onMarketRefresh={() => setMarketRefreshKey((k) => k + 1)}
+        />
+      }
+    >
+      {active === 'market' ? <MarketPage refreshKey={marketRefreshKey} /> : null}
+      {active === 'sectors' ? <SectorsPage /> : null}
+      {active === 'signals' ? <SignalsPage /> : null}
+      {active === 'evaluation' ? <EvaluationPage /> : null}
+    </AppLayout>
   )
 }
 
