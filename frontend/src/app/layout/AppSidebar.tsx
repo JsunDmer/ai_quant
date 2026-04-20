@@ -81,9 +81,31 @@ export function AppSidebar(props: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div>
-        <div style={{ fontWeight: 700, fontSize: 14 }}>股民间投资助手</div>
-        <div style={{ marginTop: 2, fontSize: 12, color: 'var(--text-secondary)' }}>React + FastAPI</div>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>股民间投资助手</div>
+          <div style={{ marginTop: 2, fontSize: 12, color: 'var(--text-secondary)' }}>React + FastAPI</div>
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{themeLabel}</span>
+          <select
+            value={themeMode}
+            onChange={(e) => onChangeTheme(e.target.value as ThemeMode)}
+            aria-label="主题切换"
+            style={{
+              background: 'var(--bg-secondary)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 6,
+              padding: '6px 8px',
+              fontSize: 12,
+            }}
+          >
+            <option value="system">系统</option>
+            <option value="light">浅色</option>
+            <option value="dark">深色</option>
+          </select>
+        </div>
       </div>
 
       <div style={{ borderTop: '1px solid var(--border-color)' }} />
@@ -129,29 +151,7 @@ export function AppSidebar(props: {
         <div style={{ fontSize: 12, color: 'var(--accent-red)' }}>{jobError}</div>
       ) : null}
 
-      <div style={{ borderTop: '1px solid var(--border-color)', marginTop: 4 }} />
-
-      <SectionTitle>设置</SectionTitle>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>主题：{themeLabel}</div>
-        <select
-          value={themeMode}
-          onChange={(e) => onChangeTheme(e.target.value as ThemeMode)}
-          style={{
-            marginLeft: 'auto',
-            background: 'var(--bg-secondary)',
-            color: 'var(--text-primary)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 6,
-            padding: '6px 8px',
-            fontSize: 12,
-          }}
-        >
-          <option value="system">系统</option>
-          <option value="light">浅色</option>
-          <option value="dark">深色</option>
-        </select>
-      </div>
+      {/* 预留：后续将数据源/AI/自动刷新等设置放在这里 */}
     </div>
   );
 }

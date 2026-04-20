@@ -101,6 +101,29 @@ export function MarketPage(props: { refreshKey: number }) {
             borderRadius: 8,
           }}
         >
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>今日新闻</div>
+          {Array.isArray(data.news) && data.news.length > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+              {data.news.slice(0, 20).map((n, idx) => (
+                <NewsCard key={idx} item={n} />
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>暂无新闻数据（可能是当天采集为空或未开启相关数据源）。</div>
+          )}
+        </div>
+      ) : null}
+
+      {data ? (
+        <div
+          style={{
+            marginTop: 12,
+            padding: '12px 16px',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 8,
+          }}
+        >
           <div style={{ fontWeight: 600, marginBottom: 8 }}>指数涨跌（示意）</div>
           <EChart option={buildIndicesChangeOption(data.indices, readTokens(), themeKey)} />
           <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
@@ -130,6 +153,46 @@ function Metric(props: { label: string; value: string }) {
       <div style={{ marginTop: 6, color: 'var(--text-primary)', fontFamily: '"JetBrains Mono", ui-monospace, monospace', fontWeight: 600, fontSize: 18 }}>
         {props.value}
       </div>
+    </div>
+  );
+}
+
+function NewsCard(props: { item: unknown }) {
+  const r = typeof props.item === 'object' && props.item ? (props.item as Record<string, unknown>) : {};
+  const title = String(r.title ?? r.标题 ?? r.headline ?? r.name ?? '—');
+  const summary = String(r.summary ?? r.摘要 ?? r.snippet ?? r.brief ?? '');
+  const url = (r.url ?? r.link ?? r.source_url ?? r.sourceUrl ?? r.href) as unknown;
+  const href = typeof url === 'string' && url.startsWith('http') ? url : null;
+
+  return (
+    <div
+      style={{
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border-color)',
+        borderRadius: 10,
+        padding: '12px 14px',
+        boxShadow: 'var(--shadow-sm)',
+      }}
+    >
+      <div style={{ fontWeight: 600, lineHeight: 1.35 }}>
+        {href ? (
+          <a href={href} target="_blank" rel="noreferrer">
+            {title}
+          </a>
+        ) : (
+          title
+        )}
+      </div>
+      {summary ? (
+        <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+          {summary}
+        </div>
+      ) : null}
+      {href ? (
+        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+          {new URL(href).hostname}
+        </div>
+      ) : null}
     </div>
   );
 }
