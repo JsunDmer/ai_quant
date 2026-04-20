@@ -10,6 +10,8 @@ export function MarketPage(props: { refreshKey: number }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [themeKey, setThemeKey] = useState<string>(() => document.documentElement.getAttribute('data-theme') ?? 'light');
+  const [newsSource, setNewsSource] = useState<string>('全部');
+  const [newsQuery, setNewsQuery] = useState<string>('');
 
   useEffect(() => {
     const el = document.documentElement;
@@ -103,11 +105,57 @@ export function MarketPage(props: { refreshKey: number }) {
         >
           <div style={{ fontWeight: 600, marginBottom: 8 }}>今日新闻</div>
           {Array.isArray(data.news) && data.news.length > 0 ? (
+            <>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+                <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                  来源
+                  <select
+                    value={newsSource}
+                    onChange={(e) => setNewsSource(e.target.value)}
+                    style={{
+                      marginLeft: 6,
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: 6,
+                      padding: '6px 8px',
+                      fontSize: 12,
+                    }}
+                  >
+                    {buildNewsSources(data.news).map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <input
+                  value={newsQuery}
+                  onChange={(e) => setNewsQuery(e.target.value)}
+                  placeholder="搜索标题/内容"
+                  style={{
+                    flex: '1 1 220px',
+                    background: 'var(--bg-secondary)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 6,
+                    padding: '8px 10px',
+                    fontSize: 12,
+                    outline: 'none',
+                  }}
+                />
+                <div style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
+                  {filterNews(data.news, newsSource, newsQuery).length}/{data.news.length}
+                </div>
+              </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
-              {data.news.slice(0, 20).map((n, idx) => (
-                <NewsCard key={idx} item={n} />
+              {filterNews(data.news, newsSource, newsQuery)
+                .slice(0, 20)
+                .map((n, idx) => (
+                  <NewsCard key={idx} item={n} />
               ))}
             </div>
+            </>
           ) : (
             <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>暂无新闻数据（可能是当天采集为空或未开启相关数据源）。</div>
           )}
@@ -160,9 +208,13 @@ function Metric(props: { label: string; value: string }) {
 function NewsCard(props: { item: unknown }) {
   const r = typeof props.item === 'object' && props.item ? (props.item as Record<string, unknown>) : {};
   const title = String(r.title ?? r.标题 ?? r.headline ?? r.name ?? '—');
-  const summary = String(r.summary ?? r.摘要 ?? r.snippet ?? r.brief ?? '');
+  const content = String(r.content ?? r.内容 ?? r.text ?? '');
+  const summary = String(r.summary ?? r.摘要 ?? r.snippet ?? r.brief ?? content).trim();
+  const time = String(r.time ?? r.时间 ?? r.published_at ?? r.publishedAt ?? r.date ?? '').trim();
+  const source = String(r.source ?? r.来源 ?? r.site ?? '').trim();
   const url = (r.url ?? r.link ?? r.source_url ?? r.sourceUrl ?? r.href) as unknown;
   const href = typeof url === 'string' && url.startsWith('http') ? url : null;
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <div
@@ -183,18 +235,80 @@ function NewsCard(props: { item: unknown }) {
           title
         )}
       </div>
+      <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        {source ? <Chip>{source}</Chip> : null}
+        {time ? <Chip>{time}</Chip> : null}
+        {href ? <Chip>{new URL(href).hostname}</Chip> : null}
+      </div>
       {summary ? (
         <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-          {summary}
+          {expanded ? summary : summary.slice(0, 140) + (summary.length > 140 ? '…' : '')}
         </div>
       ) : null}
-      {href ? (
-        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
-          {new URL(href).hostname}
-        </div>
+      {summary && summary.length > 140 ? (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          style={{
+            marginTop: 8,
+            background: 'transparent',
+            border: '1px solid var(--border-color)',
+            color: 'var(--text-secondary)',
+            borderRadius: 999,
+            padding: '6px 10px',
+            fontSize: 12,
+            cursor: 'pointer',
+          }}
+        >
+          {expanded ? '收起' : '展开'}
+        </button>
       ) : null}
     </div>
   );
+}
+
+function Chip(props: { children: string }) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '3px 8px',
+        background: 'var(--bg-secondary)',
+        border: '1px solid var(--border-color)',
+        borderRadius: 999,
+        fontSize: 12,
+        color: 'var(--text-secondary)',
+      }}
+    >
+      {props.children}
+    </span>
+  );
+}
+
+function buildNewsSources(news: unknown[]): string[] {
+  const sources = new Set<string>();
+  for (const n of news) {
+    const r = typeof n === 'object' && n ? (n as Record<string, unknown>) : {};
+    const s = String(r.source ?? r.来源 ?? r.site ?? '').trim();
+    if (s) sources.add(s);
+  }
+  return ['全部', ...Array.from(sources).sort((a, b) => a.localeCompare(b))];
+}
+
+function filterNews(news: unknown[], source: string, query: string): unknown[] {
+  const q = query.trim().toLowerCase();
+  return news
+    .slice()
+    .filter((n) => {
+      const r = typeof n === 'object' && n ? (n as Record<string, unknown>) : {};
+      const s = String(r.source ?? r.来源 ?? r.site ?? '').trim();
+      if (source !== '全部' && s !== source) return false;
+      if (!q) return true;
+      const title = String(r.title ?? r.标题 ?? '').toLowerCase();
+      const content = String(r.content ?? r.内容 ?? r.text ?? r.summary ?? r.摘要 ?? '').toLowerCase();
+      return title.includes(q) || content.includes(q);
+    });
 }
 
 function buildIndicesChangeOption(
