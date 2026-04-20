@@ -7,8 +7,8 @@ from typing import List, Dict, Any
 
 from openai import OpenAI
 
-from config import config
-from db import AISectorAnalysis, db
+from stock_mvp.config import config
+from stock_mvp.db import AISectorAnalysis, db
 
 
 class AISectorAnalyzer:

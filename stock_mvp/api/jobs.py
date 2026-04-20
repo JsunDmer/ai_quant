@@ -7,7 +7,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Literal
 
-from pipeline import run_post_close_pipeline
+from stock_mvp.pipeline import run_post_close_pipeline
 
 JobStatus = Literal["queued", "running", "success", "failed"]
 

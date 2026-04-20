@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 FRONTEND_DIR="${REPO_ROOT}/frontend"
 
-mode="${1:-all}" # api | web | all | streamlit
+mode="${1:-all}" # api | web | all
 
 echo "🚀 启动 Stock MVP（新版）..."
 echo "📁 repo: ${REPO_ROOT}"
@@ -44,7 +44,7 @@ start_api() {
   need_cmd python
   need_cmd uvicorn
   echo "🟦 启动 FastAPI: http://127.0.0.1:8000"
-  (cd "${SCRIPT_DIR}" && uvicorn run_api:app --host 127.0.0.1 --port 8000) &
+  (cd "${REPO_ROOT}" && uvicorn stock_mvp.api.main:app --host 127.0.0.1 --port 8000) &
   API_PID=$!
 }
 
@@ -59,13 +59,6 @@ start_web() {
   WEB_PID=$!
 }
 
-start_streamlit() {
-  need_cmd streamlit
-  echo "🟨 启动旧版 Streamlit: http://127.0.0.1:8501"
-  (cd "${SCRIPT_DIR}" && streamlit run app.py) &
-  STREAMLIT_PID=$!
-}
-
 case "${mode}" in
   api)
     start_api
@@ -77,11 +70,8 @@ case "${mode}" in
     start_api
     start_web
     ;;
-  streamlit)
-    start_streamlit
-    ;;
   *)
-    echo "用法：./start.sh [api|web|all|streamlit]"
+    echo "用法：./start.sh [api|web|all]"
     exit 2
     ;;
 esac

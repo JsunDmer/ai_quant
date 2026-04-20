@@ -2,7 +2,7 @@ import importlib
 
 
 def test_kline_fallback_order(monkeypatch):
-    stock_data = importlib.import_module("data.stock_data")
+    stock_data = importlib.import_module("stock_mvp.data.stock_data")
     sd = stock_data.StockData()
     calls = []
 

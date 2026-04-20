@@ -5,13 +5,13 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import time
 
-from data import akshare_patch
+from stock_mvp.data import akshare_patch
 
 akshare_patch.patch()
 import akshare as ak
 import pandas as pd
 
-from db import Database, SectorStock
+from stock_mvp.db import Database, SectorStock
 
 
 class SectorData:

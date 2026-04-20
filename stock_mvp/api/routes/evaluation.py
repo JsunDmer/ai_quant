@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query
 
-from evaluation.sector_evaluator import sector_evaluator
+from stock_mvp.evaluation.sector_evaluator import sector_evaluator
 
 
 router = APIRouter(prefix="/api/evaluation", tags=["evaluation"])

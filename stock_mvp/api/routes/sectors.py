@@ -2,7 +2,7 @@ import json
 
 from fastapi import APIRouter
 
-from db import db
+from stock_mvp.db import db
 
 
 router = APIRouter(prefix="/api/sectors", tags=["sectors"])

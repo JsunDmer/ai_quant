@@ -1,8 +1,5 @@
 # Stock MVP Requirements
 
-# UI Framework
-streamlit>=1.30.0
-
 # Web API
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0

@@ -25,7 +25,7 @@ from typing import List, Dict
 import requests
 from openai import OpenAI
 
-from config import config
+from stock_mvp.config import config
 
 import warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="duckduckgo_search")

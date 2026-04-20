@@ -8,7 +8,7 @@ from typing import List, Optional
 from dataclasses import dataclass, asdict
 from contextlib import contextmanager
 
-from config import config
+from stock_mvp.config import config
 
 
 @dataclass

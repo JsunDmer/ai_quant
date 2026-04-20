@@ -29,19 +29,19 @@ def _make_news(title="Test", content="Body", time="2026-02-23 10:00:00",
 # ===========================================================================
 class TestNormalizeTitle:
     def test_strips_punctuation_and_spaces(self):
-        from data.news_collector import _normalize_title
+        from stock_mvp.data.news_collector import _normalize_title
         assert _normalize_title("A股 大涨！！") == "A股大涨"
 
     def test_strips_chinese_punctuation(self):
-        from data.news_collector import _normalize_title
+        from stock_mvp.data.news_collector import _normalize_title
         assert _normalize_title("你好，世界。") == "你好世界"
 
     def test_empty_string(self):
-        from data.news_collector import _normalize_title
+        from stock_mvp.data.news_collector import _normalize_title
         assert _normalize_title("") == ""
 
     def test_already_clean(self):
-        from data.news_collector import _normalize_title
+        from stock_mvp.data.news_collector import _normalize_title
         assert _normalize_title("科技板块领涨") == "科技板块领涨"
 
 
@@ -50,7 +50,7 @@ class TestNormalizeTitle:
 # ===========================================================================
 class TestDeduplicate:
     def test_removes_exact_duplicate_titles(self):
-        from data.news_collector import _deduplicate
+        from stock_mvp.data.news_collector import _deduplicate
         items = [
             _make_news("A股大涨", content="short"),
             _make_news("A股大涨", content="longer content here"),
@@ -61,7 +61,7 @@ class TestDeduplicate:
         assert result[0]["content"] == "longer content here"
 
     def test_removes_fuzzy_duplicate(self):
-        from data.news_collector import _deduplicate
+        from stock_mvp.data.news_collector import _deduplicate
         items = [
             _make_news("科技板块今日大幅上涨超过5%", content="a"),
             _make_news("科技板块今日大幅上涨超5%", content="ab"),
@@ -70,7 +70,7 @@ class TestDeduplicate:
         assert len(result) == 1
 
     def test_keeps_distinct_titles(self):
-        from data.news_collector import _deduplicate
+        from stock_mvp.data.news_collector import _deduplicate
         items = [
             _make_news("A股收盘大涨"),
             _make_news("比特币跌破6万"),
@@ -79,7 +79,7 @@ class TestDeduplicate:
         assert len(result) == 2
 
     def test_skips_empty_titles(self):
-        from data.news_collector import _deduplicate
+        from stock_mvp.data.news_collector import _deduplicate
         items = [
             _make_news(""),
             _make_news("Valid Title"),
@@ -89,7 +89,7 @@ class TestDeduplicate:
         assert result[0]["title"] == "Valid Title"
 
     def test_exact_dup_prefers_longer_content(self):
-        from data.news_collector import _deduplicate
+        from stock_mvp.data.news_collector import _deduplicate
         items = [
             _make_news("Same Title", content="x" * 100),
             _make_news("Same Title", content="y" * 10),
@@ -103,10 +103,10 @@ class TestDeduplicate:
 # 3. DuckDuckGo source
 # ===========================================================================
 class TestFetchDuckDuckGo:
-    @patch("data.news_collector.HAS_DDGS", True)
-    @patch("data.news_collector.DDGS")
+    @patch("stock_mvp.data.news_collector.HAS_DDGS", True)
+    @patch("stock_mvp.data.news_collector.DDGS")
     def test_returns_formatted_news(self, MockDDGS):
-        from data.news_collector import _fetch_duckduckgo
+        from stock_mvp.data.news_collector import _fetch_duckduckgo
         mock_instance = MockDDGS.return_value
         mock_instance.news.return_value = [
             {
@@ -125,16 +125,16 @@ class TestFetchDuckDuckGo:
         assert item["source"] == "新浪财经"
         assert item["url"] == "https://finance.sina.com.cn/123"
 
-    @patch("data.news_collector.HAS_DDGS", False)
+    @patch("stock_mvp.data.news_collector.HAS_DDGS", False)
     def test_returns_empty_when_ddgs_not_installed(self):
-        from data.news_collector import _fetch_duckduckgo
+        from stock_mvp.data.news_collector import _fetch_duckduckgo
         result = _fetch_duckduckgo()
         assert result == []
 
-    @patch("data.news_collector.HAS_DDGS", True)
-    @patch("data.news_collector.DDGS")
+    @patch("stock_mvp.data.news_collector.HAS_DDGS", True)
+    @patch("stock_mvp.data.news_collector.DDGS")
     def test_handles_exception_gracefully(self, MockDDGS):
-        from data.news_collector import _fetch_duckduckgo
+        from stock_mvp.data.news_collector import _fetch_duckduckgo
         MockDDGS.side_effect = Exception("connection error")
         result = _fetch_duckduckgo()
         assert result == []
@@ -144,9 +144,9 @@ class TestFetchDuckDuckGo:
 # 4. Eastmoney source
 # ===========================================================================
 class TestFetchEastmoney:
-    @patch("data.news_collector.requests.get")
+    @patch("stock_mvp.data.news_collector.requests.get")
     def test_parses_json_response(self, mock_get):
-        from data.news_collector import _fetch_eastmoney
+        from stock_mvp.data.news_collector import _fetch_eastmoney
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.raise_for_status = MagicMock()
@@ -173,16 +173,16 @@ class TestFetchEastmoney:
         assert "摘要" in item["content"]
         assert item["source"] == "东方财富"
 
-    @patch("data.news_collector.requests.get")
+    @patch("stock_mvp.data.news_collector.requests.get")
     def test_returns_empty_on_network_error(self, mock_get):
-        from data.news_collector import _fetch_eastmoney
+        from stock_mvp.data.news_collector import _fetch_eastmoney
         mock_get.side_effect = Exception("timeout")
         result = _fetch_eastmoney()
         assert result == []
 
-    @patch("data.news_collector.requests.get")
+    @patch("stock_mvp.data.news_collector.requests.get")
     def test_strips_html_tags(self, mock_get):
-        from data.news_collector import _fetch_eastmoney
+        from stock_mvp.data.news_collector import _fetch_eastmoney
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.raise_for_status = MagicMock()
@@ -208,9 +208,9 @@ class TestFetchEastmoney:
 # 5. Sina source
 # ===========================================================================
 class TestFetchSina:
-    @patch("data.news_collector.requests.get")
+    @patch("stock_mvp.data.news_collector.requests.get")
     def test_parses_roll_api_response(self, mock_get):
-        from data.news_collector import _fetch_sina
+        from stock_mvp.data.news_collector import _fetch_sina
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.raise_for_status = MagicMock()
@@ -237,9 +237,9 @@ class TestFetchSina:
         # Time should be converted from unix timestamp
         assert "2025" in item["time"] or "2026" in item["time"]
 
-    @patch("data.news_collector.requests.get")
+    @patch("stock_mvp.data.news_collector.requests.get")
     def test_converts_unix_timestamp(self, mock_get):
-        from data.news_collector import _fetch_sina
+        from stock_mvp.data.news_collector import _fetch_sina
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.raise_for_status = MagicMock()
@@ -261,9 +261,9 @@ class TestFetchSina:
         # Should be a formatted datetime string, not raw unix
         assert not result[0]["time"].isdigit()
 
-    @patch("data.news_collector.requests.get")
+    @patch("stock_mvp.data.news_collector.requests.get")
     def test_returns_empty_on_network_error(self, mock_get):
-        from data.news_collector import _fetch_sina
+        from stock_mvp.data.news_collector import _fetch_sina
         mock_get.side_effect = Exception("timeout")
         result = _fetch_sina()
         assert result == []
@@ -273,9 +273,9 @@ class TestFetchSina:
 # 5b. Yicai source
 # ===========================================================================
 class TestFetchYicai:
-    @patch("data.news_collector.requests.get")
+    @patch("stock_mvp.data.news_collector.requests.get")
     def test_parses_json_response(self, mock_get):
-        from data.news_collector import _fetch_yicai
+        from stock_mvp.data.news_collector import _fetch_yicai
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = [
@@ -293,9 +293,9 @@ class TestFetchYicai:
         assert result[0]["source"] == "第一财经"
         assert "yicai.com" in result[0]["url"]
 
-    @patch("data.news_collector.requests.get")
+    @patch("stock_mvp.data.news_collector.requests.get")
     def test_returns_empty_on_error(self, mock_get):
-        from data.news_collector import _fetch_yicai
+        from stock_mvp.data.news_collector import _fetch_yicai
         mock_get.side_effect = Exception("timeout")
         assert _fetch_yicai() == []
 
@@ -304,9 +304,9 @@ class TestFetchYicai:
 # 5c. ThePaper source
 # ===========================================================================
 class TestFetchThePaper:
-    @patch("data.news_collector.requests.get")
+    @patch("stock_mvp.data.news_collector.requests.get")
     def test_parses_hot_news(self, mock_get):
-        from data.news_collector import _fetch_thepaper
+        from stock_mvp.data.news_collector import _fetch_thepaper
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {
@@ -324,9 +324,9 @@ class TestFetchThePaper:
         assert result[0]["source"] == "澎湃新闻"
         assert "12345" in result[0]["url"]
 
-    @patch("data.news_collector.requests.get")
+    @patch("stock_mvp.data.news_collector.requests.get")
     def test_returns_empty_on_error(self, mock_get):
-        from data.news_collector import _fetch_thepaper
+        from stock_mvp.data.news_collector import _fetch_thepaper
         mock_get.side_effect = Exception("timeout")
         assert _fetch_thepaper() == []
 
@@ -335,16 +335,16 @@ class TestFetchThePaper:
 # 5d. Jiemian source
 # ===========================================================================
 class TestFetchJiemian:
-    @patch("data.news_collector.HAS_BS4", False)
+    @patch("stock_mvp.data.news_collector.HAS_BS4", False)
     def test_returns_empty_without_bs4(self):
-        from data.news_collector import _fetch_jiemian
+        from stock_mvp.data.news_collector import _fetch_jiemian
         assert _fetch_jiemian() == []
 
-    @patch("data.news_collector.HAS_BS4", True)
-    @patch("data.news_collector.requests.get")
-    @patch("data.news_collector.BeautifulSoup")
+    @patch("stock_mvp.data.news_collector.HAS_BS4", True)
+    @patch("stock_mvp.data.news_collector.requests.get")
+    @patch("stock_mvp.data.news_collector.BeautifulSoup")
     def test_parses_html_fragment(self, MockBS, mock_get, ):
-        from data.news_collector import _fetch_jiemian
+        from stock_mvp.data.news_collector import _fetch_jiemian
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.text = json.dumps({"data": '<a href="/article/123">界面头条新闻标题</a>'})
@@ -362,10 +362,10 @@ class TestFetchJiemian:
         assert result[0]["title"] == "界面头条新闻标题"
         assert result[0]["source"] == "界面新闻"
 
-    @patch("data.news_collector.HAS_BS4", True)
-    @patch("data.news_collector.requests.get")
+    @patch("stock_mvp.data.news_collector.HAS_BS4", True)
+    @patch("stock_mvp.data.news_collector.requests.get")
     def test_returns_empty_on_error(self, mock_get):
-        from data.news_collector import _fetch_jiemian
+        from stock_mvp.data.news_collector import _fetch_jiemian
         mock_get.side_effect = Exception("timeout")
         assert _fetch_jiemian() == []
 
@@ -374,16 +374,16 @@ class TestFetchJiemian:
 # 5e. Caixin source
 # ===========================================================================
 class TestFetchCaixin:
-    @patch("data.news_collector.HAS_BS4", False)
+    @patch("stock_mvp.data.news_collector.HAS_BS4", False)
     def test_returns_empty_without_bs4(self):
-        from data.news_collector import _fetch_caixin
+        from stock_mvp.data.news_collector import _fetch_caixin
         assert _fetch_caixin() == []
 
-    @patch("data.news_collector.HAS_BS4", True)
-    @patch("data.news_collector.requests.get")
-    @patch("data.news_collector.BeautifulSoup")
+    @patch("stock_mvp.data.news_collector.HAS_BS4", True)
+    @patch("stock_mvp.data.news_collector.requests.get")
+    @patch("stock_mvp.data.news_collector.BeautifulSoup")
     def test_parses_homepage_html(self, MockBS, mock_get):
-        from data.news_collector import _fetch_caixin
+        from stock_mvp.data.news_collector import _fetch_caixin
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.text = "<html></html>"
@@ -400,10 +400,10 @@ class TestFetchCaixin:
         assert len(result) >= 1
         assert result[0]["source"] == "财新"
 
-    @patch("data.news_collector.HAS_BS4", True)
-    @patch("data.news_collector.requests.get")
+    @patch("stock_mvp.data.news_collector.HAS_BS4", True)
+    @patch("stock_mvp.data.news_collector.requests.get")
     def test_returns_empty_on_error(self, mock_get):
-        from data.news_collector import _fetch_caixin
+        from stock_mvp.data.news_collector import _fetch_caixin
         mock_get.side_effect = Exception("timeout")
         assert _fetch_caixin() == []
 
@@ -412,16 +412,16 @@ class TestFetchCaixin:
 # 5f. Guancha source
 # ===========================================================================
 class TestFetchGuancha:
-    @patch("data.news_collector.HAS_BS4", False)
+    @patch("stock_mvp.data.news_collector.HAS_BS4", False)
     def test_returns_empty_without_bs4(self):
-        from data.news_collector import _fetch_guancha
+        from stock_mvp.data.news_collector import _fetch_guancha
         assert _fetch_guancha() == []
 
-    @patch("data.news_collector.HAS_BS4", True)
-    @patch("data.news_collector.requests.get")
-    @patch("data.news_collector.BeautifulSoup")
+    @patch("stock_mvp.data.news_collector.HAS_BS4", True)
+    @patch("stock_mvp.data.news_collector.requests.get")
+    @patch("stock_mvp.data.news_collector.BeautifulSoup")
     def test_parses_economy_page(self, MockBS, mock_get):
-        from data.news_collector import _fetch_guancha
+        from stock_mvp.data.news_collector import _fetch_guancha
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.text = "<html></html>"
@@ -439,10 +439,10 @@ class TestFetchGuancha:
         assert result[0]["source"] == "观察者网"
         assert result[0]["time"] == "2026-02-23"
 
-    @patch("data.news_collector.HAS_BS4", True)
-    @patch("data.news_collector.requests.get")
+    @patch("stock_mvp.data.news_collector.HAS_BS4", True)
+    @patch("stock_mvp.data.news_collector.requests.get")
     def test_returns_empty_on_error(self, mock_get):
-        from data.news_collector import _fetch_guancha
+        from stock_mvp.data.news_collector import _fetch_guancha
         mock_get.side_effect = Exception("timeout")
         assert _fetch_guancha() == []
 
@@ -452,15 +452,15 @@ class TestFetchGuancha:
 # ===========================================================================
 class TestCollectAllNews:
     _PATCHES = [
-        "data.news_collector._fetch_guancha",
-        "data.news_collector._fetch_caixin",
-        "data.news_collector._fetch_jiemian",
-        "data.news_collector._fetch_thepaper",
-        "data.news_collector._fetch_yicai",
-        "data.news_collector._fetch_via_agent",
-        "data.news_collector._fetch_sina",
-        "data.news_collector._fetch_eastmoney",
-        "data.news_collector._fetch_duckduckgo",
+        "stock_mvp.data.news_collector._fetch_guancha",
+        "stock_mvp.data.news_collector._fetch_caixin",
+        "stock_mvp.data.news_collector._fetch_jiemian",
+        "stock_mvp.data.news_collector._fetch_thepaper",
+        "stock_mvp.data.news_collector._fetch_yicai",
+        "stock_mvp.data.news_collector._fetch_via_agent",
+        "stock_mvp.data.news_collector._fetch_sina",
+        "stock_mvp.data.news_collector._fetch_eastmoney",
+        "stock_mvp.data.news_collector._fetch_duckduckgo",
     ]
 
     @patch(_PATCHES[0])
@@ -474,7 +474,7 @@ class TestCollectAllNews:
     @patch(_PATCHES[8])
     def test_merges_all_sources(self, mock_ddg, mock_em, mock_sina, mock_agent,
                                 mock_yicai, mock_thepaper, mock_jiemian, mock_caixin, mock_guancha):
-        from data.news_collector import collect_all_news
+        from stock_mvp.data.news_collector import collect_all_news
         mock_ddg.return_value = [_make_news("DDG新闻", source="DuckDuckGo")]
         mock_em.return_value = [_make_news("东财新闻", source="东方财富")]
         mock_sina.return_value = [_make_news("新浪新闻", source="新浪财经")]
@@ -503,7 +503,7 @@ class TestCollectAllNews:
     @patch(_PATCHES[8])
     def test_deduplicates_across_sources(self, mock_ddg, mock_em, mock_sina, mock_agent,
                                          mock_yicai, mock_thepaper, mock_jiemian, mock_caixin, mock_guancha):
-        from data.news_collector import collect_all_news
+        from stock_mvp.data.news_collector import collect_all_news
         mock_ddg.return_value = [_make_news("A股大涨突破3000点", content="short")]
         mock_em.return_value = [_make_news("A股大涨突破3000点", content="longer content version")]
         mock_sina.return_value = []
@@ -529,7 +529,7 @@ class TestCollectAllNews:
     @patch(_PATCHES[8])
     def test_respects_limit(self, mock_ddg, mock_em, mock_sina, mock_agent,
                             mock_yicai, mock_thepaper, mock_jiemian, mock_caixin, mock_guancha):
-        from data.news_collector import collect_all_news
+        from stock_mvp.data.news_collector import collect_all_news
         mock_ddg.return_value = [_make_news(f"DDG{i}") for i in range(10)]
         mock_em.return_value = [_make_news(f"EM{i}") for i in range(10)]
         mock_sina.return_value = [_make_news(f"SINA{i}") for i in range(10)]
@@ -554,7 +554,7 @@ class TestCollectAllNews:
     @patch(_PATCHES[8])
     def test_sorts_by_time_descending(self, mock_ddg, mock_em, mock_sina, mock_agent,
                                       mock_yicai, mock_thepaper, mock_jiemian, mock_caixin, mock_guancha):
-        from data.news_collector import collect_all_news
+        from stock_mvp.data.news_collector import collect_all_news
         mock_ddg.return_value = [_make_news("Early", time="2026-02-23 08:00:00")]
         mock_em.return_value = [_make_news("Late", time="2026-02-23 12:00:00")]
         mock_sina.return_value = [_make_news("Mid", time="2026-02-23 10:00:00")]
@@ -581,7 +581,7 @@ class TestCollectAllNews:
     @patch(_PATCHES[8])
     def test_continues_when_one_source_fails(self, mock_ddg, mock_em, mock_sina, mock_agent,
                                              mock_yicai, mock_thepaper, mock_jiemian, mock_caixin, mock_guancha):
-        from data.news_collector import collect_all_news
+        from stock_mvp.data.news_collector import collect_all_news
         mock_ddg.side_effect = Exception("DDG down")
         mock_em.return_value = [_make_news("东财新闻")]
         mock_sina.return_value = [_make_news("新浪新闻")]
@@ -606,7 +606,7 @@ class TestCollectAllNews:
     @patch(_PATCHES[8])
     def test_returns_empty_when_all_sources_fail(self, mock_ddg, mock_em, mock_sina, mock_agent,
                                                  mock_yicai, mock_thepaper, mock_jiemian, mock_caixin, mock_guancha):
-        from data.news_collector import collect_all_news
+        from stock_mvp.data.news_collector import collect_all_news
         for m in (mock_ddg, mock_em, mock_sina, mock_agent,
                   mock_yicai, mock_thepaper, mock_jiemian, mock_caixin, mock_guancha):
             m.side_effect = Exception("fail")
@@ -626,7 +626,7 @@ class TestCollectAllNews:
     def test_output_format(self, mock_ddg, mock_em, mock_sina, mock_agent,
                            mock_yicai, mock_thepaper, mock_jiemian, mock_caixin, mock_guancha):
         """Each news item must have title, content, time, source, url keys."""
-        from data.news_collector import collect_all_news
+        from stock_mvp.data.news_collector import collect_all_news
         mock_ddg.return_value = [_make_news("Test")]
         for m in (mock_em, mock_sina, mock_agent, mock_yicai, mock_thepaper,
                   mock_jiemian, mock_caixin, mock_guancha):
@@ -642,10 +642,10 @@ class TestCollectAllNews:
 # 7. _execute_web_search
 # ===========================================================================
 class TestExecuteWebSearch:
-    @patch("data.news_collector.HAS_DDGS", True)
-    @patch("data.news_collector.DDGS")
+    @patch("stock_mvp.data.news_collector.HAS_DDGS", True)
+    @patch("stock_mvp.data.news_collector.DDGS")
     def test_returns_json_string(self, MockDDGS):
-        from data.news_collector import _execute_web_search
+        from stock_mvp.data.news_collector import _execute_web_search
         mock_instance = MockDDGS.return_value
         mock_instance.news.return_value = [
             {"title": "新闻1", "body": "内容1", "date": "2026-02-23", "source": "src", "url": "http://a.com"}
@@ -656,17 +656,17 @@ class TestExecuteWebSearch:
         assert len(parsed) == 1
         assert parsed[0]["title"] == "新闻1"
 
-    @patch("data.news_collector.HAS_DDGS", False)
+    @patch("stock_mvp.data.news_collector.HAS_DDGS", False)
     def test_returns_error_when_no_ddgs(self):
-        from data.news_collector import _execute_web_search
+        from stock_mvp.data.news_collector import _execute_web_search
         result = _execute_web_search("A股")
         parsed = json.loads(result)
         assert "error" in parsed
 
-    @patch("data.news_collector.HAS_DDGS", True)
-    @patch("data.news_collector.DDGS")
+    @patch("stock_mvp.data.news_collector.HAS_DDGS", True)
+    @patch("stock_mvp.data.news_collector.DDGS")
     def test_returns_error_on_exception(self, MockDDGS):
-        from data.news_collector import _execute_web_search
+        from stock_mvp.data.news_collector import _execute_web_search
         MockDDGS.return_value.news.side_effect = Exception("search failed")
         result = _execute_web_search("A股")
         parsed = json.loads(result)
@@ -678,7 +678,7 @@ class TestExecuteWebSearch:
 # ===========================================================================
 class TestParseAgentResponse:
     def test_parses_plain_json_array(self):
-        from data.news_collector import _parse_agent_response
+        from stock_mvp.data.news_collector import _parse_agent_response
         text = json.dumps([
             {"title": "新闻A", "content": "内容A", "time": "2026-02-23", "source": "AI", "url": "http://a.com"},
             {"title": "新闻B", "content": "内容B", "time": "2026-02-23", "source": "AI", "url": "http://b.com"},
@@ -688,31 +688,31 @@ class TestParseAgentResponse:
         assert result[0]["title"] == "新闻A"
 
     def test_parses_markdown_wrapped_json(self):
-        from data.news_collector import _parse_agent_response
+        from stock_mvp.data.news_collector import _parse_agent_response
         text = '```json\n[{"title": "新闻C", "content": "c", "time": "", "source": "AI", "url": ""}]\n```'
         result = _parse_agent_response(text)
         assert len(result) == 1
         assert result[0]["title"] == "新闻C"
 
     def test_extracts_json_from_mixed_text(self):
-        from data.news_collector import _parse_agent_response
+        from stock_mvp.data.news_collector import _parse_agent_response
         text = '以下是搜索结果:\n[{"title": "新闻D", "content": "d", "time": "", "source": "AI", "url": ""}]\n以上是结果。'
         result = _parse_agent_response(text)
         assert len(result) == 1
         assert result[0]["title"] == "新闻D"
 
     def test_returns_empty_on_invalid_json(self):
-        from data.news_collector import _parse_agent_response
+        from stock_mvp.data.news_collector import _parse_agent_response
         result = _parse_agent_response("这不是JSON")
         assert result == []
 
     def test_returns_empty_on_empty_string(self):
-        from data.news_collector import _parse_agent_response
+        from stock_mvp.data.news_collector import _parse_agent_response
         result = _parse_agent_response("")
         assert result == []
 
     def test_skips_items_without_title(self):
-        from data.news_collector import _parse_agent_response
+        from stock_mvp.data.news_collector import _parse_agent_response
         text = json.dumps([
             {"title": "有标题", "content": "c", "time": "", "source": "", "url": ""},
             {"title": "", "content": "无标题", "time": "", "source": "", "url": ""},
@@ -727,31 +727,31 @@ class TestParseAgentResponse:
 # 9. _fetch_via_agent
 # ===========================================================================
 class TestFetchViaAgent:
-    @patch("data.news_collector.config")
+    @patch("stock_mvp.data.news_collector.config")
     def test_returns_empty_when_no_api_key(self, mock_config):
-        from data.news_collector import _fetch_via_agent
+        from stock_mvp.data.news_collector import _fetch_via_agent
         mock_config.LLM_API_KEY = ""
         mock_config.LLM_BASE_URL = "https://api.example.com"
         mock_config.LLM_MODEL = "gpt-4o"
         result = _fetch_via_agent()
         assert result == []
 
-    @patch("data.news_collector.config")
-    @patch("data.news_collector.HAS_DDGS", False)
+    @patch("stock_mvp.data.news_collector.config")
+    @patch("stock_mvp.data.news_collector.HAS_DDGS", False)
     def test_returns_empty_when_no_ddgs(self, mock_config):
-        from data.news_collector import _fetch_via_agent
+        from stock_mvp.data.news_collector import _fetch_via_agent
         mock_config.LLM_API_KEY = "sk-test"
         mock_config.LLM_BASE_URL = "https://api.example.com"
         mock_config.LLM_MODEL = "gpt-4o"
         result = _fetch_via_agent()
         assert result == []
 
-    @patch("data.news_collector.config")
-    @patch("data.news_collector.HAS_DDGS", True)
-    @patch("data.news_collector.OpenAI")
+    @patch("stock_mvp.data.news_collector.config")
+    @patch("stock_mvp.data.news_collector.HAS_DDGS", True)
+    @patch("stock_mvp.data.news_collector.OpenAI")
     def test_single_tool_call_then_final(self, MockOpenAI, mock_config):
         """Agent makes one tool call, then returns final text."""
-        from data.news_collector import _fetch_via_agent
+        from stock_mvp.data.news_collector import _fetch_via_agent
         mock_config.LLM_API_KEY = "sk-test"
         mock_config.LLM_BASE_URL = "https://api.example.com"
         mock_config.LLM_MODEL = "gpt-4o"
@@ -785,18 +785,18 @@ class TestFetchViaAgent:
 
         client.chat.completions.create.side_effect = [resp1, resp2]
 
-        with patch("data.news_collector._execute_web_search", return_value='[{"title":"搜索结果"}]'):
+        with patch("stock_mvp.data.news_collector._execute_web_search", return_value='[{"title":"搜索结果"}]'):
             result = _fetch_via_agent(max_results=15)
 
         assert len(result) == 1
         assert result[0]["title"] == "A股大涨"
 
-    @patch("data.news_collector.config")
-    @patch("data.news_collector.HAS_DDGS", True)
-    @patch("data.news_collector.OpenAI")
+    @patch("stock_mvp.data.news_collector.config")
+    @patch("stock_mvp.data.news_collector.HAS_DDGS", True)
+    @patch("stock_mvp.data.news_collector.OpenAI")
     def test_respects_max_tool_calls(self, MockOpenAI, mock_config):
         """Agent should stop after _MAX_AGENT_TOOL_CALLS rounds."""
-        from data.news_collector import _fetch_via_agent, _MAX_AGENT_TOOL_CALLS
+        from stock_mvp.data.news_collector import _fetch_via_agent, _MAX_AGENT_TOOL_CALLS
         mock_config.LLM_API_KEY = "sk-test"
         mock_config.LLM_BASE_URL = "https://api.example.com"
         mock_config.LLM_MODEL = "gpt-4o"
@@ -819,20 +819,20 @@ class TestFetchViaAgent:
 
         client.chat.completions.create.return_value = resp
 
-        with patch("data.news_collector._execute_web_search", return_value='[]'):
+        with patch("stock_mvp.data.news_collector._execute_web_search", return_value='[]'):
             result = _fetch_via_agent()
 
         # Should return empty (never got final text) but not loop forever
         assert isinstance(result, list)
         assert client.chat.completions.create.call_count <= _MAX_AGENT_TOOL_CALLS + 1
 
-    @patch("data.news_collector._fetch_agent_fallback")
-    @patch("data.news_collector.config")
-    @patch("data.news_collector.HAS_DDGS", True)
-    @patch("data.news_collector.OpenAI")
+    @patch("stock_mvp.data.news_collector._fetch_agent_fallback")
+    @patch("stock_mvp.data.news_collector.config")
+    @patch("stock_mvp.data.news_collector.HAS_DDGS", True)
+    @patch("stock_mvp.data.news_collector.OpenAI")
     def test_falls_back_on_unsupported_function_calling(self, MockOpenAI, mock_config, mock_fallback):
         """If proxy returns 400/unsupported, should fall back to _fetch_agent_fallback."""
-        from data.news_collector import _fetch_via_agent
+        from stock_mvp.data.news_collector import _fetch_via_agent
         mock_config.LLM_API_KEY = "sk-test"
         mock_config.LLM_BASE_URL = "https://api.example.com"
         mock_config.LLM_MODEL = "gpt-4o"
@@ -847,12 +847,12 @@ class TestFetchViaAgent:
         assert len(result) == 1
         assert result[0]["title"] == "Fallback新闻"
 
-    @patch("data.news_collector.config")
-    @patch("data.news_collector.HAS_DDGS", True)
-    @patch("data.news_collector.OpenAI")
+    @patch("stock_mvp.data.news_collector.config")
+    @patch("stock_mvp.data.news_collector.HAS_DDGS", True)
+    @patch("stock_mvp.data.news_collector.OpenAI")
     def test_returns_empty_on_generic_exception(self, MockOpenAI, mock_config):
         """Generic exceptions (not FC-related) should return []."""
-        from data.news_collector import _fetch_via_agent
+        from stock_mvp.data.news_collector import _fetch_via_agent
         mock_config.LLM_API_KEY = "sk-test"
         mock_config.LLM_BASE_URL = "https://api.example.com"
         mock_config.LLM_MODEL = "gpt-4o"
@@ -868,10 +868,10 @@ class TestFetchViaAgent:
 # 10. _fetch_agent_fallback
 # ===========================================================================
 class TestFetchAgentFallback:
-    @patch("data.news_collector.HAS_DDGS", True)
-    @patch("data.news_collector.DDGS")
+    @patch("stock_mvp.data.news_collector.HAS_DDGS", True)
+    @patch("stock_mvp.data.news_collector.DDGS")
     def test_generates_keywords_and_merges(self, MockDDGS):
-        from data.news_collector import _fetch_agent_fallback
+        from stock_mvp.data.news_collector import _fetch_agent_fallback
 
         mock_client = MagicMock()
 
@@ -902,7 +902,7 @@ class TestFetchAgentFallback:
         assert result[0]["title"] == "合并新闻"
 
     def test_returns_empty_on_exception(self):
-        from data.news_collector import _fetch_agent_fallback
+        from stock_mvp.data.news_collector import _fetch_agent_fallback
 
         mock_client = MagicMock()
         mock_client.chat.completions.create.side_effect = Exception("LLM error")
@@ -917,11 +917,11 @@ class TestFetchAgentFallback:
 class TestMarketDataGetNewsFallback:
     def test_uses_news_collector_first(self):
         """get_news should prefer news_collector over akshare."""
-        from data.market_data import MarketData
+        from stock_mvp.data.market_data import MarketData
         m = MarketData()
 
-        with patch("data.news_collector.collect_all_news") as mock_collect, \
-             patch("data.market_data.ak") as mock_ak:
+        with patch("stock_mvp.data.news_collector.collect_all_news") as mock_collect, \
+             patch("stock_mvp.data.market_data.ak") as mock_ak:
             mock_collect.return_value = [_make_news("From Collector")]
             result = m.get_news(limit=5)
             assert len(result) == 1
@@ -932,11 +932,11 @@ class TestMarketDataGetNewsFallback:
     def test_falls_back_to_akshare_on_collector_failure(self):
         """If news_collector fails, should fall back to akshare."""
         import pandas as pd
-        from data.market_data import MarketData
+        from stock_mvp.data.market_data import MarketData
         m = MarketData()
 
-        with patch("data.news_collector.collect_all_news", side_effect=Exception("collector broken")), \
-             patch("data.market_data.ak") as mock_ak:
+        with patch("stock_mvp.data.news_collector.collect_all_news", side_effect=Exception("collector broken")), \
+             patch("stock_mvp.data.market_data.ak") as mock_ak:
             mock_ak.stock_news_em.return_value = pd.DataFrame({
                 '新闻标题': ['AK新闻'],
                 '新闻内容': ['akshare content'],
@@ -950,11 +950,11 @@ class TestMarketDataGetNewsFallback:
 
     def test_returns_empty_when_all_fail(self):
         """If both collector and akshare fail, return []."""
-        from data.market_data import MarketData
+        from stock_mvp.data.market_data import MarketData
         m = MarketData()
 
-        with patch("data.news_collector.collect_all_news", side_effect=Exception("broken")), \
-             patch("data.market_data.ak") as mock_ak:
+        with patch("stock_mvp.data.news_collector.collect_all_news", side_effect=Exception("broken")), \
+             patch("stock_mvp.data.market_data.ak") as mock_ak:
             mock_ak.stock_news_em.side_effect = Exception("akshare broken")
             result = m.get_news(limit=5)
             assert result == []

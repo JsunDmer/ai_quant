@@ -18,18 +18,26 @@ import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 
-from data import akshare_patch
+from stock_mvp.data import akshare_patch
 akshare_patch.patch()
 
 # 在 pytest 环境下禁用进度条输出，避免第三方库在非 TTY 场景下异常
 if os.environ.get("PYTEST_CURRENT_TEST"):
     os.environ.setdefault("TQDM_DISABLE", "1")
 
-from data.market_data import MarketData
-from data.sector_data import SectorData
-from strategy.quant_strategy import QuantStrategy
-from data.stock_data import StockData
-from db import Database, MarketSnapshot, SectorRecommendation, StockSignal, AINews, AISectorAnalysis, SectorDailyPerformance
+from stock_mvp.data.market_data import MarketData
+from stock_mvp.data.sector_data import SectorData
+from stock_mvp.strategy.quant_strategy import QuantStrategy
+from stock_mvp.data.stock_data import StockData
+from stock_mvp.db import (
+    Database,
+    MarketSnapshot,
+    SectorRecommendation,
+    StockSignal,
+    AINews,
+    AISectorAnalysis,
+    SectorDailyPerformance,
+)
 
 
 # 交易日判断：简单排除周末

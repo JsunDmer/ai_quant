@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from api.app import create_app
+from stock_mvp.api.main import create_app
 
 
 def test_job_lifecycle_smoke():

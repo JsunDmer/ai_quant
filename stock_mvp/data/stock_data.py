@@ -6,7 +6,7 @@ from typing import List, Optional, Dict, Any, cast
 from datetime import datetime, timedelta
 import importlib
 
-from data import akshare_patch
+from stock_mvp.data import akshare_patch
 
 akshare_patch.patch()
 import akshare as ak
@@ -184,7 +184,7 @@ class StockData:
             print(f"[StockData] 获取K线数据 {stock_code} ...")
             end_date = datetime.now().strftime('%Y%m%d')
             start_date = (datetime.now() - timedelta(days=days)).strftime('%Y%m%d')
-            config_module = importlib.import_module("config")
+            config_module = importlib.import_module("stock_mvp.config")
             priority = [
                 item.strip()
                 for item in config_module.Config().DATA_SOURCE_PRIORITY.split(",")

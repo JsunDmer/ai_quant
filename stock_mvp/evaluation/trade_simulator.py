@@ -7,8 +7,8 @@ from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-from db import Database, SimulatedTrade
-from data.stock_data import StockData
+from stock_mvp.db import Database, SimulatedTrade
+from stock_mvp.data.stock_data import StockData
 
 # 交易规则常量
 STOP_LOSS_PCT = -5.0       # 止损 -5%
