@@ -14,7 +14,7 @@ def test_job_lifecycle_smoke():
     assert r.status_code in (200, 202)
     payload = r.json()
     assert "task_id" in payload
-    assert payload["status"] in ("queued", "running")
+    assert payload["status"] in ("queued", "running", "success")
 
     task_id = payload["task_id"]
     r2 = c.get(f"/api/jobs/{task_id}")

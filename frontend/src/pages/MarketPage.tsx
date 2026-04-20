@@ -2,11 +2,23 @@ import { useEffect, useState } from 'react';
 import { ApiError, apiGet } from '../api/client';
 import type { MarketLatestResponse } from '../api/types';
 import { PageHeader } from '../app/layout/PageHeader';
+import { EChart } from '../charts/EChart';
+import { readTokens } from '../charts/tokens';
 
 export function MarketPage(props: { refreshKey: number }) {
   const [data, setData] = useState<MarketLatestResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [themeKey, setThemeKey] = useState<string>(() => document.documentElement.getAttribute('data-theme') ?? 'light');
+
+  useEffect(() => {
+    const el = document.documentElement;
+    const mo = new MutationObserver(() => {
+      setThemeKey(document.documentElement.getAttribute('data-theme') ?? 'light');
+    });
+    mo.observe(el, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => mo.disconnect();
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -78,6 +90,24 @@ export function MarketPage(props: { refreshKey: number }) {
           </div>
         </div>
       ) : null}
+
+      {data ? (
+        <div
+          style={{
+            marginTop: 12,
+            padding: '12px 16px',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 8,
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>指数涨跌（示意）</div>
+          <EChart option={buildIndicesChangeOption(data.indices, readTokens(), themeKey)} />
+          <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+            若某些指数字段缺失，会自动跳过；后续可按你确认的字段结构做严谨映射。
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -102,5 +132,53 @@ function Metric(props: { label: string; value: string }) {
       </div>
     </div>
   );
+}
+
+function buildIndicesChangeOption(
+  indices: unknown[],
+  tokens: ReturnType<typeof readTokens>,
+  _themeKey: string
+) {
+  const rows = (Array.isArray(indices) ? indices : [])
+    .map((x) => (typeof x === 'object' && x ? (x as Record<string, unknown>) : null))
+    .filter(Boolean) as Record<string, unknown>[];
+
+  const items = rows
+    .map((r) => {
+      const name = (r.name ?? r.指数 ?? r.index_name ?? r.symbol ?? '') as string;
+      const raw = (r.change_pct ?? r.涨跌幅 ?? r.pct_change ?? r.changePercent ?? r.change ?? null) as unknown;
+      const v = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw.replace('%', '')) : NaN;
+      if (!name || !Number.isFinite(v)) return null;
+      return { name, value: v };
+    })
+    .filter(Boolean) as { name: string; value: number }[];
+
+  const names = items.map((i) => i.name);
+  const values = items.map((i) => i.value);
+
+  return {
+    grid: { left: 48, right: 16, top: 20, bottom: 40 },
+    xAxis: {
+      type: 'category' as const,
+      data: names,
+      axisLabel: { color: tokens.textSecondary },
+      axisLine: { lineStyle: { color: tokens.borderColor } },
+    },
+    yAxis: {
+      type: 'value' as const,
+      axisLabel: { color: tokens.textSecondary },
+      splitLine: { lineStyle: { color: tokens.borderColor } },
+    },
+    tooltip: { trigger: 'axis' as const },
+    series: [
+      {
+        type: 'bar' as const,
+        data: values,
+        itemStyle: {
+          color: tokens.accentBlue,
+        },
+      },
+    ],
+  };
 }
 

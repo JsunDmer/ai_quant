@@ -36,6 +36,7 @@ try:
     from ddgs import DDGS
     HAS_DDGS = True
 except ImportError:
+    DDGS = None  # for tests/mocking
     HAS_DDGS = False
 
 # BeautifulSoup - 可选依赖 (用于 HTML 解析源)

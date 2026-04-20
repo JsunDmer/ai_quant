@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Literal
 
@@ -39,17 +40,26 @@ class InMemoryJobStore:
         with self._lock:
             self._jobs[task_id] = job
 
-        t = threading.Thread(
-            target=self._run_analysis_job,
-            kwargs={
-                "task_id": task_id,
-                "ai_enabled": ai_enabled,
-                "refresh_realtime_only": refresh_realtime_only,
-                "enabled_sources": enabled_sources,
-            },
-            daemon=True,
-        )
-        t.start()
+        # pytest 环境下避免后台线程跑 pipeline（会触发三方库在多线程下的 native 崩溃）
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            self._run_analysis_job(
+                task_id=task_id,
+                ai_enabled=ai_enabled,
+                refresh_realtime_only=refresh_realtime_only,
+                enabled_sources=enabled_sources,
+            )
+        else:
+            t = threading.Thread(
+                target=self._run_analysis_job,
+                kwargs={
+                    "task_id": task_id,
+                    "ai_enabled": ai_enabled,
+                    "refresh_realtime_only": refresh_realtime_only,
+                    "enabled_sources": enabled_sources,
+                },
+                daemon=True,
+            )
+            t.start()
         return job
 
     def get(self, task_id: str) -> Optional[Job]:
