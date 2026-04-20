@@ -135,6 +135,42 @@ flowchart LR
 **圆角：** 卡片与 Alert `8px`；输入、次级按钮、Tab 内 pill `6px`。  
 **间距：** 基准 `4px` 网格；区块纵向间距优先 `12px` / `16px`；页面左右内边距与 Streamlit `block-container` 紧凑风格一致（约 `16px`～`24px`）。
 
+### 6.1.1 主题切换（浅色 / 深色 / 跟随系统）
+
+**目标：** 支持背景与整体 UI 在「浅色」「深色」「系统」三种模式间切换，并确保涨跌语义色在深色下仍可读。
+
+- **入口位置：** 侧边栏「设置区块」新增 **主题** 选项：`浅色 / 深色 / 跟随系统`。
+- **持久化：** 前端使用 `localStorage` 保存用户选择；`跟随系统` 时监听 `prefers-color-scheme` 变化并即时切换。
+- **实现方式：** 通过 `html` 或 `body` 挂载属性，例如 `data-theme="light|dark"`；令牌按主题覆盖，业务组件只引用令牌，不硬编码颜色。
+
+**浅色主题（默认）**：沿用本节表格中现有值（与 Streamlit 现版一致）。
+
+**深色主题（新增一组覆盖值，保持 FinTech 质感但不刺眼）**：
+
+| Token | 值 | 说明 |
+|--------|-----|------|
+| `--bg-primary` | `#0b1220` | 页面底色（深蓝黑） |
+| `--bg-secondary` | `#0f1a2e` | 次级底（侧边栏分组/小面板底） |
+| `--bg-tertiary` | `#13223b` | 分隔/禁用底 |
+| `--bg-card` | `#0f172a` | 卡片底（接近 slate-900） |
+| `--bg-card-hover` | `#111d34` | 卡片悬停 |
+| `--border-color` | `#1e2a44` | 默认描边 |
+| `--border-strong` | `#2a3a5f` | 强调描边 |
+| `--text-primary` | `#e5e7eb` | 主文字 |
+| `--text-secondary` | `#a1a9b8` | 次文字 |
+| `--text-muted` | `#7b879b` | 弱化 |
+| `--accent-blue` | `#60a5fa` | 主操作/选中（深色更亮） |
+| `--accent-cyan` | `#22d3ee` | 链接悬停 |
+| `--accent-green` | `#34d399` | 涨色 |
+| `--accent-green-dim` | `rgba(52, 211, 153, 0.14)` | 涨区淡底（深色提高不透明度） |
+| `--accent-red` | `#fb7185` | 跌色（偏玫红，深色更柔） |
+| `--accent-red-dim` | `rgba(251, 113, 133, 0.14)` | 跌区淡底 |
+| `--shadow-sm` | `0 1px 2px rgba(0,0,0,0.35)` | 深色阴影更实 |
+| `--shadow-md` | `0 8px 20px rgba(0,0,0,0.35)` |  |
+| `--shadow-lg` | `0 18px 40px rgba(0,0,0,0.45)` |  |
+
+**注意：** 深色下不建议使用纯黑与纯白；所有面板以 `--bg-card` 为基准分层，边框承担分割作用，减少“发灰一坨”的观感。
+
 ### 6.2 字体与排版
 
 | 用途 | 字体 | 说明 |
@@ -180,6 +216,10 @@ flowchart LR
 - **系列默认色：** 主序列 `--accent-blue`；辅助序列 `--accent-cyan` / `--accent-purple`。
 - **涨/跌系列：** 涨 `--accent-green`，跌 `--accent-red`；K 线若存在则实心/空心规则与行业习惯一致即可。
 - **tooltip：** 背景 `#fff`，边框 `--border-color`，文字 `--text-primary`。
+
+**主题切换要求：** 当 `data-theme` 变化时，ECharts 必须同步换肤：\n
+- 简化策略：统一在图表容器组件里监听主题变化，销毁并重建实例（首版可接受，避免大量 option merge 的边界问题）。\n
+- 细化策略（后续可选）：仅更新 `backgroundColor`、`textStyle`、`axisLine/axisLabel`、`splitLine`、`tooltip` 等 theme 相关配置并 `setOption` 合并更新。
 
 ### 6.6 交互与无障碍（MVP 底线）
 
