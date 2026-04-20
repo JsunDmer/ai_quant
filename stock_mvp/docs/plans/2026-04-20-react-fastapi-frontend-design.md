@@ -9,6 +9,7 @@
 - 方案：**Vite + React（TypeScript）+ FastAPI**，不采用 Next.js（除非后续有 SSR/站点化强需求再评估）。
 - 长任务（如「执行分析」）：**任务 ID + 客户端轮询任务状态**（方案 A）。
 - 可视化：新前端图表统一 **Apache ECharts**（与项目约定一致）；与现有 Streamlit/Plotly 为替换关系，迁移期可只对齐关键图表后再逐步收口。
+- UI：**第 6 节《UI 设计规范》** 定义 FinTech Light 令牌、应用壳层、组件与 ECharts 主题，实现时照抄变量与布局即可。
 - 工程位置：在仓库内新增 **`frontend/`**（与 `stock_mvp/` 并列），避免与 Python 包结构混淆；构建产物由部署层或 FastAPI `StaticFiles` 挂载（实现阶段再定）。
 
 ---
@@ -43,7 +44,7 @@ flowchart LR
   API --> Core
 ```
 
-- **前端**：路由或顶层 Tab 对齐现有四大模块；全局样式复刻现有 FinTech Light 主题（建议 CSS 变量 + 组件库按需选型，实现阶段再定）。
+- **前端**：路由或顶层 Tab 对齐现有四大模块；**视觉与交互以第 6 节《UI 设计规范》为准**（FinTech Light、Design Tokens、壳层与 ECharts 主题）。
 - **后端**：FastAPI 应用入口独立模块（例如 `stock_mvp/api/` 或 `stock_mvp/webapi/`），**不**把业务逻辑堆在路由函数内，而是调用现有函数/新增薄 service 层。
 - **跨域**：开发环境配置 CORS；生产可由反向代理同源，减少 CORS 暴露面。
 
@@ -101,25 +102,120 @@ flowchart LR
 
 ---
 
-## 6. 测试策略
+## 6. UI 设计规范（实现前对齐）
+
+**设计关键词：** 轻量金融科技（FinTech Light）、高信息密度、冷静配色、涨跌语义色一致。与当前 `app.py` 中 `custom_css` 变量 **1:1 延续**，避免换框架后「像另一个产品」。
+
+### 6.1 设计令牌（Design Tokens）
+
+在 `frontend` 中以 **CSS 自定义属性** 定义全局 `:root`，实现时可直接照抄下列值。
+
+| Token | 值 | 用途 |
+|--------|-----|------|
+| `--bg-primary` | `#f8fafc` | 页面底色 |
+| `--bg-secondary` | `#f1f5f9` | Tab 轨道、次要区块底 |
+| `--bg-tertiary` | `#e2e8f0` | 分隔、禁用底 |
+| `--bg-card` | `#ffffff` | 卡片、面板 |
+| `--bg-card-hover` | `#fafafa` | 卡片悬停 |
+| `--border-color` | `#e2e8f0` | 默认描边 |
+| `--border-strong` | `#cbd5e1` | 悬停/强调描边 |
+| `--text-primary` | `#1e293b` | 标题、正文主色 |
+| `--text-secondary` | `#64748b` | 说明、标签 |
+| `--text-muted` | `#94a3b8` | 占位、弱化 |
+| `--accent-green` | `#10b981` | 涨、正向 Delta |
+| `--accent-green-dim` | `rgba(16,185,129,0.1)` | 涨区背景条 |
+| `--accent-red` | `#ef4444` | 跌、负向 Delta |
+| `--accent-red-dim` | `rgba(239,68,68,0.1)` | 跌区背景条 |
+| `--accent-blue` | `#3b82f6` | 主按钮、选中 Tab、链接 |
+| `--accent-cyan` | `#0891b2` | 链接悬停 |
+| `--accent-gold` | `#f59e0b` | 强调提示（少用） |
+| `--accent-purple` | `#8b5cf6` | 次要高亮 |
+| `--shadow-sm/md/lg` | （同现有 CSS） | 卡片与 Tab 选中态 |
+
+**圆角：** 卡片与 Alert `8px`；输入、次级按钮、Tab 内 pill `6px`。  
+**间距：** 基准 `4px` 网格；区块纵向间距优先 `12px` / `16px`；页面左右内边距与 Streamlit `block-container` 紧凑风格一致（约 `16px`～`24px`）。
+
+### 6.2 字体与排版
+
+| 用途 | 字体 | 说明 |
+|------|------|------|
+| 中文 UI | `Noto Sans SC`, system-ui | 标题字重 600；正文 400/500 |
+| 数字、代码、指标 | `JetBrains Mono`, monospace | 价格、涨跌幅、表格数字列 |
+
+**字号阶梯（与现版接近）：** 页标题 `1.5rem`；区块标题 `1.1rem`～`1.25rem`；正文 `13px`～`14px`；指标大卡数字 `18px`；辅助标签 `11px`、大写+微字距（等同 `stMetricLabel` 风格）。
+
+### 6.3 应用壳层（App Shell）
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 顶栏：产品名「股民间投资助手」  数据日期 / 状态   [设置⚙] [执行分析] │
+├─────────────────────────────────────────────────────────────┤
+│ Tab： 市场分析 | 板块分析 | 个股分析 | 评估报告              │
+│ （轨道背景 --bg-secondary，选中项 --accent-blue 白字）      │
+├─────────────────────────────────────────────────────────────┤
+│ 主内容区（--bg-primary，卡片铺排）                            │
+│   ┌ 区块标题（涨区左侧条用 --accent-green，跌区用 --accent-red）│
+│   └ 图表 / 表格 / 卡片栅格                                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+- **顶栏：** 左侧品牌与日期；右侧主操作「执行分析」（Primary）、**设置** 打开抽屉（承载原侧栏：数据源、AI 开关、自动刷新间隔等）。长任务进行中顶栏展示 **轻量进度条或文案**，与轮询状态同步。
+- **Tab：** 视觉行为对齐现有 Streamlit：轨道 `padding: 4px`、`gap: 2px`、整轨 `border-radius: 8px`；选中 Tab 白字 + `shadow-sm`。
+- **设置抽屉：** 宽度 `320px`～`360px`，背景 `--bg-card`，与侧栏同级信息密度；表单项 `13px`，聚焦环 `2px rgba(59,130,246,0.15)`。
+
+### 6.4 组件规格摘要
+
+| 组件 | 规格 |
+|------|------|
+| **主按钮** | 背景 `--accent-blue`，白字，`border-radius: 6px`，`padding: 8px 16px`，悬停 `#2563eb` + `shadow-md` |
+| **次按钮** | 白底、 `--border-color` 描边，悬停底 `--bg-secondary`、描边 `--accent-blue` |
+| **指标卡（Metric）** | 白底、细边框、`8px` 圆角、`12px 16px` 内边距；标签 uppercase 小字；数值 JetBrains Mono |
+| **信息提示** | Info：`rgba(59,130,246,0.08)` 底 + 蓝色系描边（与现有 `stAlert` 一致）；Success/Warning/Error 沿用现 CSS 语义 |
+| **新闻/板块卡片** | 白底卡片 + `shadow-sm`；链接 `--accent-blue` → 悬停 `--accent-cyan` |
+| **表格** | 斑马纹可选；表头 `--text-secondary`；数字列右对齐、等宽字体 |
+
+### 6.5 ECharts 主题（与令牌对齐）
+
+在 `frontend` 封装统一 `echarts.init` 前注入 **theme 对象**（或 JSON theme），与 Design Tokens 一致，避免图表与 UI 脱节：
+
+- **背景：** 透明或 `--bg-card`，网格线 `--border-color`。
+- **类目轴文字：** `--text-secondary`；**数值轴：** JetBrains Mono。
+- **系列默认色：** 主序列 `--accent-blue`；辅助序列 `--accent-cyan` / `--accent-purple`。
+- **涨/跌系列：** 涨 `--accent-green`，跌 `--accent-red`；K 线若存在则实心/空心规则与行业习惯一致即可。
+- **tooltip：** 背景 `#fff`，边框 `--border-color`，文字 `--text-primary`。
+
+### 6.6 交互与无障碍（MVP 底线）
+
+- **焦点：** 可聚焦控件具备可见 `outline` 或 `box-shadow`（与现输入框 `2px` 蓝环一致）。
+- **加载：** 区块级 `Skeleton` 或轻量 `Spinner`，避免整页白屏；轮询任务时禁用重复提交「执行分析」。
+- **响应式：** 首版以 **桌面宽屏** 为主（对齐当前 `layout="wide"`）；中窄屏允许 Tab 横向滚动、卡片改为单列。
+
+### 6.7 与实现计划的衔接
+
+实现阶段第一步在 `frontend/src/styles/tokens.css`（或等价）落盘上述变量；壳层组件 `AppHeader`、`MainTabs`、`SettingsDrawer` 按本节施工；图表统一通过 `useEchartsTheme()`（或常量）注册，**禁止**在业务页散落硬编码色值。
+
+---
+
+## 7. 测试策略
 
 - **Python**：为 FastAPI 路由增加 **异步客户端测试**（`httpx.AsyncClient` + `TestClient`），覆盖任务创建与轮询状态机；核心 pipeline 保持现有 `tests/` 覆盖。
 - **前端**：Vitest 测 hooks/纯函数；关键流程可选 Playwright（实现阶段按需）。
 
 ---
 
-## 7. 迁移与兼容
+## 8. 迁移与兼容
 
 - **Streamlit**：新栈可运行后，保留 `app.py` 一段时间作为回退或仅文档说明「已废弃」，删除时机在实现计划尾声与用户确认。
 - **依赖**：`requirements.txt` 增加 `fastapi`、`uvicorn[standard]` 等；前端独立 `package.json`，**不在未说明情况下**在根目录复制多份 node 工程。
 
 ---
 
-## 8. 自检（spec 质量）
+## 9. 自检（spec 质量）
 
 - [x] 无 TBD 占位：多 worker 任务一致性标为后续风险，非占位。
 - [x] 与已确认方案一致：Vite+React+FastAPI、轮询任务 A。
 - [x] 范围：MVP 为单进程任务存储 + 四大模块 API 化 + 前端壳与主路径打通。
+- [x] UI：第 6 节已给出 Design Tokens、壳层、组件与 ECharts 对齐规则。
 
 ---
 
