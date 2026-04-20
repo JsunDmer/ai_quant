@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from stock_mvp.api.app import create_app
+from api.app import create_app
 
 
 def test_health_ok():
