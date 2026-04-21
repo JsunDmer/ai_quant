@@ -3,3 +3,8 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+select option {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}

@@ -5,7 +5,7 @@
 from datetime import datetime
 from typing import List, Dict, Optional
 
-from stock_mvp.db import Database, PredictionEvaluation
+from backend.data.db import Database, PredictionEvaluation
 
 
 class SectorEvaluator:

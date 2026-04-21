@@ -3,6 +3,7 @@ export type UiTokens = {
   borderColor: string;
   textPrimary: string;
   textSecondary: string;
+  textMuted: string;
   accentBlue: string;
   accentGreen: string;
   accentRed: string;
@@ -16,6 +17,7 @@ export function readTokens(): UiTokens {
     borderColor: get('--border-color'),
     textPrimary: get('--text-primary'),
     textSecondary: get('--text-secondary'),
+    textMuted: get('--text-muted'),
     accentBlue: get('--accent-blue'),
     accentGreen: get('--accent-green'),
     accentRed: get('--accent-red'),

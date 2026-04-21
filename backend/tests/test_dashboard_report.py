@@ -1,4 +1,4 @@
-from stock_mvp.pipeline import run_post_close_pipeline
+from backend.pipeline import run_post_close_pipeline
 
 
 def test_dashboard_report_shape():

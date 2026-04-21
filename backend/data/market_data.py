@@ -5,7 +5,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 import pandas as pd
 
-from stock_mvp.data import akshare_patch
+from backend.data import akshare_patch
 
 akshare_patch.patch()
 import akshare as ak
@@ -104,7 +104,7 @@ class MarketData:
         """获取财经新闻（多源采集，akshare 兜底）"""
         # 优先使用多源采集器
         try:
-            from stock_mvp.data.news_collector import collect_all_news
+            from backend.data.news_collector import collect_all_news
             news = collect_all_news(limit=limit, enabled_sources=enabled_sources)
             if news:
                 return news

@@ -3,7 +3,7 @@ from typing import Optional, List
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from stock_mvp.api.jobs import job_store
+from backend.api.jobs import job_store
 
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])

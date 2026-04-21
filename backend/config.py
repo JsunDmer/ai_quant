@@ -7,6 +7,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# 本文件所在目录即 backend/；相对 DB_PATH 一律相对此目录解析，避免 cwd 不同生成多份 .db
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _resolve_db_path(raw: str | None) -> str:
+    value = (raw or "backend.db").strip() or "backend.db"
+    if os.path.isabs(value):
+        return os.path.normpath(value)
+    return os.path.normpath(os.path.join(_BACKEND_DIR, value))
+
+
+_RESOLVED_DB_PATH = _resolve_db_path(os.getenv("DB_PATH"))
+
 
 @dataclass
 class Config:
@@ -31,8 +44,8 @@ class Config:
     # 钉钉推送配置
     DINGDING_WEBHOOK: str = os.getenv("DINGDING_WEBHOOK", "")
     
-    # 数据库路径
-    DB_PATH: str = os.getenv("DB_PATH", "stock_mvp.db")
+    # 数据库路径（相对路径相对于 backend/，与进程 cwd 无关）
+    DB_PATH: str = _RESOLVED_DB_PATH
     
     # AI 分析配置
     AI_MAX_TOKENS: int = 4096
@@ -52,6 +65,9 @@ class Config:
     TRADING_DAY_CHECK_TIME: str = os.getenv("TRADING_DAY_CHECK_TIME", "15:30")  # 交易日检查时间
     PIPELINE_RETRY_COUNT: int = int(os.getenv("PIPELINE_RETRY_COUNT", "3"))
     PIPELINE_TIMEOUT: int = int(os.getenv("PIPELINE_TIMEOUT", "300"))  # 单步超时秒数
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "DB_PATH", _resolve_db_path(self.DB_PATH))
 
 
 # 全局配置实例

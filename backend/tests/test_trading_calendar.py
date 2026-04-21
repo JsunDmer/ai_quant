@@ -1,4 +1,4 @@
-from stock_mvp.pipeline import get_trading_date
+from backend.pipeline import get_trading_date
 
 
 def test_non_trading_day_rolls_back():

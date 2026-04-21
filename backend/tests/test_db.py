@@ -12,11 +12,11 @@ class TestDatabaseTables:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             os.environ["DB_PATH"] = db_path
-            if 'stock_mvp.db' in sys.modules:
-                del sys.modules['stock_mvp.db']
-            if 'stock_mvp.config' in sys.modules:
-                del sys.modules['stock_mvp.config']
-            from stock_mvp.db import Database
+            if 'backend.data.db' in sys.modules:
+                del sys.modules['backend.data.db']
+            if 'backend.config' in sys.modules:
+                del sys.modules['backend.config']
+            from backend.data.db import Database
             db = Database(db_path)
             with db.get_connection() as conn:
                 tables = [row[0] for row in conn.execute(
@@ -35,11 +35,11 @@ class TestMarketSnapshot:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             os.environ["DB_PATH"] = db_path
-            if 'stock_mvp.db' in sys.modules:
-                del sys.modules['stock_mvp.db']
-            if 'stock_mvp.config' in sys.modules:
-                del sys.modules['stock_mvp.config']
-            from stock_mvp.db import Database, MarketSnapshot
+            if 'backend.data.db' in sys.modules:
+                del sys.modules['backend.data.db']
+            if 'backend.config' in sys.modules:
+                del sys.modules['backend.config']
+            from backend.data.db import Database, MarketSnapshot
             db = Database(db_path)
             snapshot = MarketSnapshot(
                 trade_date="2024-01-15",
@@ -61,11 +61,11 @@ class TestMarketSnapshot:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             os.environ["DB_PATH"] = db_path
-            if 'stock_mvp.db' in sys.modules:
-                del sys.modules['stock_mvp.db']
-            if 'stock_mvp.config' in sys.modules:
-                del sys.modules['stock_mvp.config']
-            from stock_mvp.db import Database, MarketSnapshot
+            if 'backend.data.db' in sys.modules:
+                del sys.modules['backend.data.db']
+            if 'backend.config' in sys.modules:
+                del sys.modules['backend.config']
+            from backend.data.db import Database, MarketSnapshot
             db = Database(db_path)
             snapshot1 = MarketSnapshot(
                 trade_date="2024-01-15",
@@ -101,11 +101,11 @@ class TestSectorRecommendation:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             os.environ["DB_PATH"] = db_path
-            if 'stock_mvp.db' in sys.modules:
-                del sys.modules['stock_mvp.db']
-            if 'stock_mvp.config' in sys.modules:
-                del sys.modules['stock_mvp.config']
-            from stock_mvp.db import Database, SectorRecommendation
+            if 'backend.data.db' in sys.modules:
+                del sys.modules['backend.data.db']
+            if 'backend.config' in sys.modules:
+                del sys.modules['backend.config']
+            from backend.data.db import Database, SectorRecommendation
             db = Database(db_path)
             rec = SectorRecommendation(
                 trade_date="2024-01-15",
@@ -125,11 +125,11 @@ class TestSectorRecommendation:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             os.environ["DB_PATH"] = db_path
-            if 'stock_mvp.db' in sys.modules:
-                del sys.modules['stock_mvp.db']
-            if 'stock_mvp.config' in sys.modules:
-                del sys.modules['stock_mvp.config']
-            from stock_mvp.db import Database, SectorRecommendation
+            if 'backend.data.db' in sys.modules:
+                del sys.modules['backend.data.db']
+            if 'backend.config' in sys.modules:
+                del sys.modules['backend.config']
+            from backend.data.db import Database, SectorRecommendation
             db = Database(db_path)
             sectors = [
                 SectorRecommendation("2024-01-15", "科技板块", 85.5, "bullish", '{"r1": "a"}'),
@@ -150,11 +150,11 @@ class TestStockSignal:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             os.environ["DB_PATH"] = db_path
-            if 'stock_mvp.db' in sys.modules:
-                del sys.modules['stock_mvp.db']
-            if 'stock_mvp.config' in sys.modules:
-                del sys.modules['stock_mvp.config']
-            from stock_mvp.db import Database, StockSignal
+            if 'backend.data.db' in sys.modules:
+                del sys.modules['backend.data.db']
+            if 'backend.config' in sys.modules:
+                del sys.modules['backend.config']
+            from backend.data.db import Database, StockSignal
             db = Database(db_path)
             signal = StockSignal(
                 trade_date="2024-01-15",
@@ -176,11 +176,11 @@ class TestStockSignal:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             os.environ["DB_PATH"] = db_path
-            if 'stock_mvp.db' in sys.modules:
-                del sys.modules['stock_mvp.db']
-            if 'stock_mvp.config' in sys.modules:
-                del sys.modules['stock_mvp.config']
-            from stock_mvp.db import Database, StockSignal
+            if 'backend.data.db' in sys.modules:
+                del sys.modules['backend.data.db']
+            if 'backend.config' in sys.modules:
+                del sys.modules['backend.config']
+            from backend.data.db import Database, StockSignal
             db = Database(db_path)
             signals = [
                 StockSignal("2024-01-15", "600000", "股票A", "板块A", "buy", 0.8, '{}'),
@@ -197,11 +197,11 @@ class TestStockSignal:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             os.environ["DB_PATH"] = db_path
-            if 'stock_mvp.db' in sys.modules:
-                del sys.modules['stock_mvp.db']
-            if 'stock_mvp.config' in sys.modules:
-                del sys.modules['stock_mvp.config']
-            from stock_mvp.db import Database, StockSignal
+            if 'backend.data.db' in sys.modules:
+                del sys.modules['backend.data.db']
+            if 'backend.config' in sys.modules:
+                del sys.modules['backend.config']
+            from backend.data.db import Database, StockSignal
             db = Database(db_path)
             signal1 = StockSignal(
                 trade_date="2024-01-15",
@@ -234,11 +234,11 @@ class TestBackwardCompatibility:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             os.environ["DB_PATH"] = db_path
-            if 'stock_mvp.db' in sys.modules:
-                del sys.modules['stock_mvp.db']
-            if 'stock_mvp.config' in sys.modules:
-                del sys.modules['stock_mvp.config']
-            from stock_mvp.db import Database, FollowedStock
+            if 'backend.data.db' in sys.modules:
+                del sys.modules['backend.data.db']
+            if 'backend.config' in sys.modules:
+                del sys.modules['backend.config']
+            from backend.data.db import Database, FollowedStock
             db = Database(db_path)
             stock = FollowedStock(
                 stock_code="600519",

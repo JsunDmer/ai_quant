@@ -16,7 +16,7 @@ def test_normalize_kline_columns():
             "涨跌幅": [1.2],
         }
     )
-    stock_data = importlib.import_module("stock_mvp.data.stock_data")
+    stock_data = importlib.import_module("backend.data.stock_data")
     normalized = stock_data.StockData()._normalize_kline_df(df)
     assert {
         "date",

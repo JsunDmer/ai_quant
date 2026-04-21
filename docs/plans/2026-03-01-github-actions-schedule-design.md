@@ -9,7 +9,7 @@
 - 新增 `.github/workflows/daily_pipeline.yml`。
 - 定时触发：UTC `01:00` 与 `07:00`（对应北京时间 09:00/15:00）。
 - 手动触发：`workflow_dispatch`。
-- 执行入口：`python -m pipeline run-post-close`。
+- 执行入口：`python -m backend.pipeline run-post-close`。
 
 ## Secrets 与权限
 - Secrets：`LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`。
@@ -17,7 +17,7 @@
 
 ## 产物策略
 - 默认仅保留 Actions 日志。
-- 可选 artifacts：`stock_mvp/stock_mvp.db` 与 `reports/`（如需要再启用）。
+- 可选 artifacts：`backend/stock_mvp.db` 与 `reports/`（如需要再启用）。
 
 ## 失败处理
 - 失败时保留完整日志输出，供排查。

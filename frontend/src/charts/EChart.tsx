@@ -1,49 +1,60 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import * as echarts from 'echarts';
 
-import { readTokens } from './tokens';
+import { getChartTokens, type ChartPalette } from './chartTokens';
 
-export function EChart(props: { option: echarts.EChartsOption; style?: React.CSSProperties }) {
+export function EChart(props: {
+  option: echarts.EChartsOption;
+  style?: React.CSSProperties;
+  chartPalette: ChartPalette;
+}) {
   const elRef = useRef<HTMLDivElement | null>(null);
-  const [themeKey, setThemeKey] = useState<string>(() => document.documentElement.getAttribute('data-theme') ?? 'light');
-
-  useEffect(() => {
-    const el = document.documentElement;
-    const mo = new MutationObserver(() => {
-      setThemeKey(document.documentElement.getAttribute('data-theme') ?? 'light');
-    });
-    mo.observe(el, { attributes: true, attributeFilter: ['data-theme'] });
-    return () => mo.disconnect();
-  }, []);
+  const chartRef = useRef<echarts.ECharts | null>(null);
 
   useEffect(() => {
     const el = elRef.current;
     if (!el) return;
 
-    const tokens = readTokens();
-    const chart = echarts.init(el, undefined, { renderer: 'canvas' });
+    let chart = chartRef.current;
+    if (!chart || chart.isDisposed?.()) {
+      chart = echarts.init(el, undefined, { renderer: 'canvas' });
+      chartRef.current = chart;
+    }
 
+    const tokens = getChartTokens(props.chartPalette);
     chart.setOption(
       {
-        backgroundColor: 'transparent',
+        backgroundColor: tokens.bgCard,
         textStyle: {
           color: tokens.textPrimary,
           fontFamily: '"Noto Sans SC", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
         },
         ...props.option,
       },
-      { notMerge: true }
+      { notMerge: true, lazyUpdate: false }
     );
+    chart.resize();
 
-    const ro = new ResizeObserver(() => chart.resize());
+    const ro = new ResizeObserver(() => {
+      const c = chartRef.current;
+      if (c && !c.isDisposed?.()) c.resize();
+    });
     ro.observe(el);
 
     return () => {
       ro.disconnect();
-      chart.dispose();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.option, themeKey]);
+  }, [props.option, props.chartPalette]);
+
+  useEffect(() => {
+    return () => {
+      const c = chartRef.current;
+      if (c && !c.isDisposed?.()) {
+        c.dispose();
+      }
+      chartRef.current = null;
+    };
+  }, []);
 
   return (
     <div
@@ -51,9 +62,10 @@ export function EChart(props: { option: echarts.EChartsOption; style?: React.CSS
       style={{
         width: '100%',
         height: 280,
+        borderRadius: 8,
+        overflow: 'hidden',
         ...props.style,
       }}
     />
   );
 }
-

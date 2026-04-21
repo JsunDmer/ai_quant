@@ -1,5 +1,5 @@
 import pytest
-from stock_mvp.data.stock_data import StockData
+from backend.data.stock_data import StockData
 
 
 def test_get_stock_capital_flow():

@@ -17,14 +17,14 @@ import subprocess
 import tempfile
 from datetime import datetime
 
- # 兼容直接执行脚本：确保可以 import stock_mvp.*
+# 兼容直接执行脚本：确保可以 import backend.*
 repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 
-from stock_mvp.db import Database, AINews
-from stock_mvp.data.news_collector import collect_all_news
-from stock_mvp.data.sector_data import sector_data
+from backend.data.db import Database, AINews
+from backend.data.news_collector import collect_all_news
+from backend.data.sector_data import sector_data
 
 
 def call_opencode(prompt: str) -> str:

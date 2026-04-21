@@ -2,7 +2,7 @@ import json
 
 from fastapi import APIRouter, HTTPException
 
-from stock_mvp.db import db
+from backend.data.db import db
 
 
 router = APIRouter(prefix="/api/market", tags=["market"])

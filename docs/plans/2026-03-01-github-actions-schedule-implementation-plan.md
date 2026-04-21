@@ -4,7 +4,7 @@
 
 **Goal:** Add GitHub Actions workflow to run the pipeline at 09:00/15:00 (CST), using Secrets for credentials, without committing artifacts back to the repo.
 
-**Architecture:** Create a workflow that installs dependencies, sets env from GitHub Secrets, runs `python -m pipeline run-post-close`, and optionally uploads artifacts. Keep permissions read-only.
+**Architecture:** Create a workflow that installs dependencies, sets env from GitHub Secrets, runs `python -m backend.pipeline run-post-close`, and optionally uploads artifacts. Keep permissions read-only.
 
 **Tech Stack:** GitHub Actions, Python
 
@@ -34,7 +34,7 @@ Expected: FAIL (file missing)
   - `schedule`: `0 1 * * *` and `0 7 * * *` (UTC)
   - `workflow_dispatch`
   - Python setup, `pip install -r requirements.txt`
-  - `python -m pipeline run-post-close`
+  - `python -m backend.pipeline run-post-close`
   - Use `env` to read `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` from Secrets
 
 **Step 4: Run test to verify it passes**
@@ -69,7 +69,7 @@ Expected: FAIL (block missing)
 
 **Step 3: Write minimal implementation**
 
-- Add commented artifact upload step for `stock_mvp/stock_mvp.db` and `reports/`
+- Add commented artifact upload step for `backend/stock_mvp.db` and `reports/`
 
 **Step 4: Run test to verify it passes**
 

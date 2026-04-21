@@ -2,24 +2,26 @@
 
 set -euo pipefail
 
+# 脚本位于仓库根目录：SCRIPT_DIR == REPO_ROOT
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="${SCRIPT_DIR}"
+BACKEND_DIR="${REPO_ROOT}/backend"
 FRONTEND_DIR="${REPO_ROOT}/frontend"
 
 mode="${1:-all}" # api | web | all
 
 echo "🚀 启动 Stock MVP（新版）..."
 echo "📁 repo: ${REPO_ROOT}"
-echo "📁 stock_mvp: ${SCRIPT_DIR}"
+echo "📁 backend: ${BACKEND_DIR}"
 echo "📁 frontend: ${FRONTEND_DIR}"
 echo "🔧 mode: ${mode}"
 
-# 检查 .env 文件
-cd "${SCRIPT_DIR}"
+# 检查后端 .env（与 backend/config 的 load_dotenv 工作目录一致）
+cd "${BACKEND_DIR}"
 if [ ! -f ".env" ]; then
-    echo "⚠️  未找到 .env 文件，正在创建..."
+    echo "⚠️  未找到 ${BACKEND_DIR}/.env，正在创建..."
     cp .env.example .env
-    echo "📝 请编辑 .env 文件，填入你的 API Key"
+    echo "📝 请编辑 ${BACKEND_DIR}/.env，填入你的 API Key"
     exit 1
 fi
 
@@ -44,7 +46,8 @@ start_api() {
   need_cmd python
   need_cmd uvicorn
   echo "🟦 启动 FastAPI: http://127.0.0.1:8000"
-  (cd "${REPO_ROOT}" && uvicorn stock_mvp.api.main:app --host 127.0.0.1 --port 8000) &
+  # 在 backend 目录下启动，保证 load_dotenv() 能读到 backend/.env；PYTHONPATH 指向仓库根以解析 backend 包
+  (cd "${BACKEND_DIR}" && PYTHONPATH="${REPO_ROOT}" uvicorn backend.api.main:app --host 127.0.0.1 --port 8000) &
   API_PID=$!
 }
 

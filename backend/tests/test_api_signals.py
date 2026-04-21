@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from stock_mvp.api.main import create_app
+from backend.api.main import create_app
 
 
 def test_signals_latest_shape():
