@@ -25,7 +25,7 @@ from typing import List, Dict
 import requests
 from openai import OpenAI
 
-from stock_mvp.config import config
+from backend.config import config
 
 import warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="duckduckgo_search")
@@ -858,7 +858,12 @@ def collect_all_news(limit: int = 20, enabled_sources: List[str] = None) -> List
     Returns:
         [{title, content, time, source, url}, ...]
     """
-    sources_str = ', '.join(enabled_sources) if enabled_sources else '全部'
+    # None / [] / 无效来源 都视为全量来源，避免误触发单一源兜底
+    if enabled_sources is not None:
+        normalized_sources = [s for s in enabled_sources if s in ALL_SOURCE_NAMES]
+        enabled_sources = normalized_sources or None
+
+    sources_str = ', '.join(enabled_sources) if enabled_sources is not None else '全部'
     print(f"[NewsCollector] 开始采集新闻，来源: {sources_str}")
     
     all_news = []

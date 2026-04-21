@@ -4,22 +4,25 @@ AI News Generator - 生成结构化财经新闻摘要
 import json
 from typing import List, Dict
 
-from openai import OpenAI
-
-from stock_mvp.config import config
-from stock_mvp.db import AINews, db
+from backend.config import config
+from backend.ai.opencode_client import is_opencode_mode, request_opencode
+from backend.data.db import AINews, db
 
 
 class AINewsGenerator:
     """AI财经新闻生成器 - 将原始新闻转换为结构化摘要"""
 
     def __init__(self):
-        """初始化OpenAI客户端"""
-        self.client = OpenAI(
-            api_key=config.LLM_API_KEY,
-            base_url=config.LLM_BASE_URL
-        )
+        """按配置初始化 LLM 客户端"""
+        self._use_opencode = is_opencode_mode()
         self.model = config.LLM_MODEL
+        self.client = None
+        if not self._use_opencode:
+            from openai import OpenAI
+            self.client = OpenAI(
+                api_key=config.LLM_API_KEY,
+                base_url=config.LLM_BASE_URL
+            )
 
     def generate_structured_news(self, raw_news: List[Dict]) -> List[Dict]:
         """
@@ -110,6 +113,16 @@ class AINewsGenerator:
             LLM返回的JSON字符串
         """
         try:
+            if self._use_opencode:
+                return request_opencode(
+                    prompt,
+                    title="news-analysis",
+                    system_prompt="你是一位专业的财经新闻分析师，擅长提取关键信息和分析市场影响。",
+                )
+
+            if self.client is None:
+                raise RuntimeError("OpenAI 客户端未初始化")
+
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
