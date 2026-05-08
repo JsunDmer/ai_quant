@@ -18,6 +18,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 
+from backend.logging_config import logger
 from backend.data import akshare_patch
 akshare_patch.patch()
 
@@ -78,6 +79,100 @@ def get_trading_date(date_str: Optional[str] = None) -> tuple[str, str]:
     return target.strftime('%Y-%m-%d'), target.strftime('%Y-%m-%d')
 
 
+def _select_candidate_sectors(recommendations: List[Dict[str, Any]], limit: int = 10) -> List[str]:
+    """
+    选择用于板块内选股的板块列表：
+    strong_recommend > watch > 其余高分板块
+    """
+    if not recommendations or limit <= 0:
+        return []
+
+    def _score_value(rec: Dict[str, Any]) -> float:
+        try:
+            return float(rec.get("score", 0) or 0)
+        except Exception:
+            return 0.0
+
+    sorted_recs = sorted(recommendations, key=_score_value, reverse=True)
+    pools = [
+        [r.get("sector_name") for r in sorted_recs if r.get("bucket") == "strong_recommend"],
+        [r.get("sector_name") for r in sorted_recs if r.get("bucket") == "watch"],
+        [
+            r.get("sector_name")
+            for r in sorted_recs
+            if r.get("bucket") not in ("strong_recommend", "watch")
+        ],
+    ]
+    selected: List[str] = []
+    seen = set()
+    for pool in pools:
+        for name in pool:
+            if not name or name in seen:
+                continue
+            selected.append(name)
+            seen.add(name)
+            if len(selected) >= limit:
+                return selected
+    return selected
+
+
+def _new_pipeline_diagnostics() -> Dict[str, Any]:
+    """初始化流水线诊断结构，用于解释推荐链路为空的原因。"""
+    return {
+        "market_snapshot": {
+            "status": "pending",
+            "news_count": 0,
+            "error": "",
+        },
+        "sector_performance": {
+            "sector_count": 0,
+            "saved_count": 0,
+            "error": "",
+        },
+        "ai_news_generation": {
+            "skipped": False,
+            "skip_reason": "",
+            "raw_news_count": 0,
+            "generated_count": 0,
+            "error": "",
+        },
+        "ai_sector_analysis": {
+            "skipped": False,
+            "skip_reason": "",
+            "ai_news_count": 0,
+            "sector_analysis_count": 0,
+            "error": "",
+        },
+        "sector_scoring": {
+            "recommendation_count": 0,
+            "bucket_counts": {},
+            "error": "",
+        },
+        "candidate_pick": {
+            "selected_sector_count": 0,
+            "selected_sectors": [],
+            "sector_pick_counts": {},
+            "sector_pick_errors": {},
+            "sector_with_picks_count": 0,
+            "candidate_count_before_auction": 0,
+            "candidate_count_after_auction": 0,
+            "auction_filtered_count": 0,
+            "missing_code_count": 0,
+            "error": "",
+        },
+        "signal_generation": {
+            "candidates_input": 0,
+            "kline_success_count": 0,
+            "kline_insufficient_count": 0,
+            "signal_counts": {},
+            "buy_signal_count": 0,
+            "failed_count": 0,
+            "failures": [],
+            "error": "",
+        },
+    }
+
+
 def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: Optional[List[str]] = None, ai_enabled: bool = True, refresh_realtime_only: bool = False) -> Dict[str, Any]:
     """
     执行收盘后流水线
@@ -95,7 +190,7 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
     """
     # Step 1: 确定交易日期
     trade_date, data_date = get_trading_date(trade_date)
-    print(f"[Pipeline] 交易日期: {trade_date}, 数据日期: {data_date}")
+    logger.info(f"Pipeline started: trade_date={trade_date}, data_date={data_date}")
     
     # 初始化结果容器
     result: Dict[str, Any] = {
@@ -104,10 +199,14 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
         'data_date': data_date,
         'market_snapshot': None,
         'sector_recommendations': [],
+        'sector_top_stocks': {},
         'stock_signals': [],
+        'auction_filtered_out': [],
+        'diagnostics': _new_pipeline_diagnostics(),
         'dashboard_report': {},
         'errors': []
     }
+    diagnostics = result['diagnostics']
     
     # 初始化模块
     market = MarketData()
@@ -117,7 +216,7 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
     db = Database()
     
     # Step 2: 市场快照采集
-    print("[Pipeline Step 1/5] 采集市场快照...")
+    logger.info("Step 1/5: 采集市场快照")
     try:
         # pytest 中该步骤会触发多源网络请求，且在某些环境下会导致进程异常退出。
         # 这里在测试环境下走离线快照，满足 shape 测试即可。
@@ -134,6 +233,8 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
         else:
             snapshot = market.collect_post_close_snapshot(trade_date, enabled_sources=enabled_sources)
         result['market_snapshot'] = snapshot
+        diagnostics["market_snapshot"]["status"] = snapshot.get("status", "unknown")
+        diagnostics["market_snapshot"]["news_count"] = len(snapshot.get("news", []) or [])
         
         # 保存到数据库
         db_snapshot = MarketSnapshot(
@@ -146,7 +247,7 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
             status=snapshot.get('status', 'completed')
         )
         db.upsert_market_snapshot(db_snapshot)
-        print(f"[Pipeline] 市场快照已保存，状态: {snapshot.get('status', 'unknown')}")
+        logger.info(f"市场快照已保存，状态: {snapshot.get('status', 'unknown')}")
         
         if snapshot.get('status') == 'degraded':
             result['errors'].append('market_snapshot: degraded')
@@ -155,16 +256,19 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
     except Exception as e:
         result['errors'].append(f'market_snapshot: {str(e)}')
         result['status'] = 'degraded'
-        print(f"[Pipeline] 市场快照采集失败: {e}")
+        diagnostics["market_snapshot"]["status"] = "failed"
+        diagnostics["market_snapshot"]["error"] = str(e)
+        logger.error(f"市场快照采集失败: {e}")
     
     # Step 1.5: 记录板块当日涨跌幅（不依赖 AI，始终执行）
     sector_list = []
-    print("[Pipeline Step 1.5] 记录板块实际涨跌幅...")
+    logger.info("Step 1.5: 记录板块实际涨跌幅")
     try:
         if os.environ.get("PYTEST_CURRENT_TEST"):
             sector_list = []
         else:
             sector_list = sector.get_sector_list()
+        diagnostics["sector_performance"]["sector_count"] = len(sector_list)
         perfs = []
         for s in sector_list:
             perfs.append(SectorDailyPerformance(
@@ -175,19 +279,25 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
             ))
         if perfs:
             db.batch_upsert_sector_daily_performance(perfs)
-            print(f"[Pipeline] 板块涨跌幅已记录，共 {len(perfs)} 个板块")
+            diagnostics["sector_performance"]["saved_count"] = len(perfs)
+            logger.info(f"板块涨跌幅已记录，共 {len(perfs)} 个板块")
     except Exception as e:
         result['errors'].append(f'sector_performance: {str(e)}')
-        print(f"[Pipeline] 板块涨跌幅记录失败: {e}")
+        diagnostics["sector_performance"]["error"] = str(e)
+        logger.error(f"板块涨跌幅记录失败: {e}")
 
     # Step 2: AI新闻生成
     structured_news = []
     if refresh_realtime_only:
-        print("[Pipeline Step 2/6] 仅更新实时数据模式，跳过AI新闻生成")
+        diagnostics["ai_news_generation"]["skipped"] = True
+        diagnostics["ai_news_generation"]["skip_reason"] = "refresh_realtime_only"
+        logger.info("Step 2: 跳过AI新闻生成 (realtime only)")
     elif not ai_enabled:
-        print("[Pipeline Step 2/6] AI分析已关闭，跳过AI新闻生成")
+        diagnostics["ai_news_generation"]["skipped"] = True
+        diagnostics["ai_news_generation"]["skip_reason"] = "ai_disabled"
+        logger.info("Step 2: 跳过AI新闻生成 (ai disabled)")
     else:
-        print("[Pipeline Step 2/6] AI新闻生成...")
+        logger.info("Step 2: AI新闻生成")
         try:
             # 获取原始新闻
             news = []
@@ -197,6 +307,7 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
                     news = snapshot.get('news', [])
             except:
                 pass
+            diagnostics["ai_news_generation"]["raw_news_count"] = len(news)
 
             if news:
                 from ai.news_generator import ai_news_generator
@@ -205,28 +316,35 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
                 structured_news = ai_news_generator.generate_structured_news(news)
 
                 if structured_news:
+                    diagnostics["ai_news_generation"]["generated_count"] = len(structured_news)
                     # 保存到数据库
                     ai_news_generator.save_to_db(trade_date, structured_news)
-                    print(f"[Pipeline] AI新闻已生成，共 {len(structured_news)} 条")
+                    logger.info(f"AI新闻已生成，共 {len(structured_news)} 条")
                 else:
-                    print("[Pipeline] AI新闻生成返回空结果")
+                    logger.info("AI新闻生成返回空结果")
             else:
-                print("[Pipeline] 无原始新闻，跳过AI新闻生成")
+                logger.info("无原始新闻，跳过AI新闻生成")
 
         except Exception as e:
             result['errors'].append(f'ai_news_generation: {str(e)}')
-            print(f"[Pipeline] AI新闻生成失败: {e}")
+            diagnostics["ai_news_generation"]["error"] = str(e)
+            logger.error(f"AI新闻生成失败: {e}")
 
     # Step 3: AI板块分析
     if refresh_realtime_only:
-        print("[Pipeline Step 3/7] 仅更新实时数据模式，跳过AI板块分析")
+        diagnostics["ai_sector_analysis"]["skipped"] = True
+        diagnostics["ai_sector_analysis"]["skip_reason"] = "refresh_realtime_only"
+        logger.info("Step 3: 跳过AI板块分析 (realtime only)")
     elif not ai_enabled:
-        print("[Pipeline Step 3/7] AI分析已关闭，跳过AI板块分析")
+        diagnostics["ai_sector_analysis"]["skipped"] = True
+        diagnostics["ai_sector_analysis"]["skip_reason"] = "ai_disabled"
+        logger.info("Step 3: 跳过AI板块分析 (ai disabled)")
     else:
-        print("[Pipeline Step 3/7] AI板块分析...")
+        logger.info("Step 3: AI板块分析")
         try:
             # 从数据库获取AI生成的新闻
             ai_news_records = db.get_ai_news(trade_date)
+            diagnostics["ai_sector_analysis"]["ai_news_count"] = len(ai_news_records)
 
             if ai_news_records:
                 # 转换为dict格式
@@ -247,21 +365,27 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
                 sector_analysis = ai_sector_analyzer.analyze_sectors(ai_news_list, sector_names=sector_names)
 
                 if sector_analysis.get('sector_analysis'):
+                    diagnostics["ai_sector_analysis"]["sector_analysis_count"] = len(sector_analysis['sector_analysis'])
                     ai_sector_analyzer.save_to_db(trade_date, sector_analysis)
-                    print(f"[Pipeline] AI板块分析完成，分析了 {len(sector_analysis['sector_analysis'])} 个板块")
+                    logger.info(f"AI板块分析完成，分析了 {len(sector_analysis['sector_analysis'])} 个板块")
                 else:
-                    print("[Pipeline] AI板块分析返回空结果")
+                    logger.info("AI板块分析返回空结果")
             else:
-                print("[Pipeline] 无AI新闻数据，跳过AI板块分析")
+                logger.info("无AI新闻数据，跳过AI板块分析")
 
         except Exception as e:
             result['errors'].append(f'ai_sector_analysis: {str(e)}')
-            print(f"[Pipeline] AI板块分析失败: {e}")
+            diagnostics["ai_sector_analysis"]["error"] = str(e)
+            logger.error(f"AI板块分析失败: {e}")
     
     # Step 4: 板块评分与推荐
-    print("[Pipeline Step 3/6] 板块评分与推荐...")
+    logger.info("Step 3: 板块评分与推荐")
     try:
         sector_results = sector.recommend_sectors()
+        diagnostics["sector_scoring"]["bucket_counts"] = {
+            bucket: len(recommendations)
+            for bucket, recommendations in sector_results.items()
+        }
         
         # 展平并保存推荐结果
         all_recommendations = []
@@ -285,41 +409,121 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
                 db.upsert_sector_recommendation(db_rec)
         
         result['sector_recommendations'] = all_recommendations
-        print(f"[Pipeline] 板块推荐已保存，共 {len(all_recommendations)} 个")
+        diagnostics["sector_scoring"]["recommendation_count"] = len(all_recommendations)
+        logger.info(f"板块推荐已保存，共 {len(all_recommendations)} 个")
         
     except Exception as e:
         result['errors'].append(f'sector_scoring: {str(e)}')
         result['status'] = 'degraded'
-        print(f"[Pipeline] 板块评分失败: {e}")
+        diagnostics["sector_scoring"]["error"] = str(e)
+        logger.error(f"板块评分失败: {e}")
     
     # Step 4: 候选股票筛选
-    print("[Pipeline Step 3/5] 筛选候选股票...")
+    logger.info("Step 3.5: 筛选候选股票")
     candidate_stocks = []
     try:
-        # 从强推荐板块中筛选候选
-        strong_recommend = result.get('sector_recommendations', [])
-        strong_sectors = [r['sector_name'] for r in strong_recommend if r['bucket'] == 'strong_recommend'][:5]
-        
-        for sector_name in strong_sectors:
+        recommendations = result.get('sector_recommendations', [])
+        sectors_for_picks = _select_candidate_sectors(recommendations, limit=10)
+        diagnostics["candidate_pick"]["selected_sectors"] = sectors_for_picks
+        diagnostics["candidate_pick"]["selected_sector_count"] = len(sectors_for_picks)
+        sector_top_stocks: Dict[str, List[Dict[str, Any]]] = {}
+
+        for sector_name in sectors_for_picks:
             try:
-                candidates = sector.pick_candidates_for_sector(sector_name, min_count=3, trade_date=trade_date)
-                for c in candidates:
-                    c['sector_name'] = sector_name
-                candidate_stocks.extend(candidates)
+                picks = sector.recommend_stocks_for_sector(
+                    sector_name=sector_name,
+                    trade_date=trade_date,
+                    min_count=3,
+                    max_count=5,
+                    allow_history=True,
+                )
+                if picks:
+                    sector_top_stocks[sector_name] = picks
+                diagnostics["candidate_pick"]["sector_pick_counts"][sector_name] = len(picks)
             except Exception as e:
-                print(f"[Pipeline] 筛选板块 {sector_name} 失败: {e}")
-        
-        print(f"[Pipeline] 候选股票 {len(candidate_stocks)} 只")
+                diagnostics["candidate_pick"]["sector_pick_errors"][sector_name] = str(e)
+                logger.error(f"筛选板块 {sector_name} 失败: {e}")
+
+        result["sector_top_stocks"] = sector_top_stocks
+        diagnostics["candidate_pick"]["sector_with_picks_count"] = len(sector_top_stocks)
+
+        # 用于信号生成时，优先取最靠前的板块，避免分析数量过大
+        for sector_name in sectors_for_picks[:6]:
+            picks = sector_top_stocks.get(sector_name, [])
+            for c in picks[:3]:
+                item = dict(c)
+                item["sector_name"] = sector_name
+                candidate_stocks.append(item)
+        diagnostics["candidate_pick"]["candidate_count_before_auction"] = len(candidate_stocks)
+
+        # 竞价弱势过滤：仅过滤明显低开且量能偏弱的候选，避免误杀
+        logger.info("Step 3.5: 开盘竞价过滤")
+        filtered_candidates: List[Dict[str, Any]] = []
+        filtered_out: List[Dict[str, Any]] = []
+        for candidate in candidate_stocks:
+            code = str(candidate.get("code", "")).strip()
+            if not code:
+                diagnostics["candidate_pick"]["missing_code_count"] += 1
+                continue
+            auction = stock_db.get_open_auction_snapshot(code, trade_date=trade_date)
+            if auction:
+                candidate["auction"] = auction
+            if stock_db.is_open_auction_weak(auction):
+                filtered_out.append(
+                    {
+                        "code": code,
+                        "name": candidate.get("name", ""),
+                        "sector_name": candidate.get("sector_name", ""),
+                        "auction": auction,
+                    }
+                )
+                continue
+            filtered_candidates.append(candidate)
+        result["auction_filtered_out"] = filtered_out
+        candidate_stocks = filtered_candidates
+        diagnostics["candidate_pick"]["auction_filtered_count"] = len(filtered_out)
+        diagnostics["candidate_pick"]["candidate_count_after_auction"] = len(candidate_stocks)
+
+        # 财务业绩过滤：只保留有业绩的股票
+        logger.info("Step 3.6: 财务业绩过滤")
+        financial_filtered: List[Dict[str, Any]] = []
+        financial_filtered_out: List[Dict[str, Any]] = []
+        for candidate in candidate_stocks:
+            code = str(candidate.get("code", "")).strip()
+            if not code:
+                continue
+            financial_check = stock_db.is_stock_has_recent_performance(
+                code,
+                min_net_profit=1e8,    # 净利润>1亿
+                min_yoy=-30.0          # 净利润同比>-30%（允许小幅下降）
+            )
+            candidate["financial"] = financial_check
+            if financial_check.get('pass'):
+                financial_filtered.append(candidate)
+            else:
+                financial_filtered_out.append({
+                    "code": code,
+                    "name": candidate.get("name", ""),
+                    "reason": financial_check.get("reason", "未知")
+                })
+        result["financial_filtered_out"] = financial_filtered_out
+        candidate_stocks = financial_filtered
+        diagnostics["candidate_pick"]["financial_filtered_count"] = len(financial_filtered_out)
+        diagnostics["candidate_pick"]["candidate_count_after_financial"] = len(candidate_stocks)
+
+        logger.info(f"候选股票 {len(candidate_stocks)} 只（财务过滤后）")
         
     except Exception as e:
         result['errors'].append(f'candidate_pick: {str(e)}')
         result['status'] = 'degraded'
-        print(f"[Pipeline] 候选股票筛选失败: {e}")
+        diagnostics["candidate_pick"]["error"] = str(e)
+        logger.error(f"候选股票筛选失败: {e}")
     
     # Step 5: 信号生成
-    print("[Pipeline Step 4/5] 生成交易信号...")
+    logger.info("Step 4: 生成交易信号")
     try:
         signals = []
+        diagnostics["signal_generation"]["candidates_input"] = len(candidate_stocks)
         for candidate in candidate_stocks:
             try:
                 code = candidate['code']
@@ -329,10 +533,15 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
                 # 获取K线数据
                 kline = stock_db.get_kline_data(code, 60)
                 if kline.empty or len(kline) < 20:
+                    diagnostics["signal_generation"]["kline_insufficient_count"] += 1
                     continue
+                diagnostics["signal_generation"]["kline_success_count"] += 1
                 
                 # 技术分析
                 analysis = strategy.analyze_stock(code, kline)
+                signal_name = analysis.get('signal', 'unknown')
+                signal_counts = diagnostics["signal_generation"]["signal_counts"]
+                signal_counts[signal_name] = signal_counts.get(signal_name, 0) + 1
                 
                 # 只保留买入信号
                 if analysis['signal'] in ['strong_buy', 'buy']:
@@ -361,19 +570,29 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
                     db.upsert_stock_signal(db_signal)
                     
             except Exception as e:
-                print(f"[Pipeline] 分析 {candidate.get('code')} 失败: {e}")
+                diagnostics["signal_generation"]["failed_count"] += 1
+                if len(diagnostics["signal_generation"]["failures"]) < 5:
+                    diagnostics["signal_generation"]["failures"].append({
+                        "code": candidate.get("code", ""),
+                        "error": str(e),
+                    })
+                logger.error(f"分析 {candidate.get('code')} 失败: {e}")
         
         result['stock_signals'] = signals
-        print(f"[Pipeline] 买入信号 {len(signals)} 个")
+        diagnostics["signal_generation"]["buy_signal_count"] = len(signals)
+        logger.info(f"买入信号 {len(signals)} 个")
         
     except Exception as e:
         result['errors'].append(f'signal_generation: {str(e)}')
         result['status'] = 'degraded'
-        print(f"[Pipeline] 信号生成失败: {e}")
+        diagnostics["signal_generation"]["error"] = str(e)
+        logger.error(f"信号生成失败: {e}")
 
     summary = {
         "sectors": len(result.get('sector_recommendations', [])),
+        "sector_top_stocks": sum(len(v) for v in result.get('sector_top_stocks', {}).values()),
         "signals": len(result.get('stock_signals', [])),
+        "auction_filtered": len(result.get('auction_filtered_out', [])),
         "status": result.get('status'),
     }
     result['dashboard_report'] = {
@@ -385,9 +604,9 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
     }
 
     # 完成
-    print(f"[Pipeline] 流水线完成，状态: {result['status']}")
+    logger.info(f"Pipeline完成，状态: {result['status']}")
     if result['errors']:
-        print(f"[Pipeline] 错误: {result['errors']}")
+        logger.error(f"Pipeline错误: {result['errors']}")
 
     return result
 

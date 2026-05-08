@@ -3,9 +3,12 @@
 """
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
+import importlib
 import pandas as pd
 
+from backend.logging_config import logger
 from backend.data import akshare_patch
+from backend.config import config
 
 akshare_patch.patch()
 import akshare as ak
@@ -19,6 +22,13 @@ class MarketData:
         self._spot_cache = None
         self._spot_cache_time = 0
         self._cache_duration = 60
+        self._tushare_module = None
+        self._tushare_pro = None
+        self._tushare_ready = False
+        self._north_flow_cache: Dict[str, Any] = {"data": {'north': 0, 'south': 0}, "ts": 0.0}
+        self._north_flow_cache_duration = 120
+        self._movers_cache: Dict[str, Any] = {"key": "", "data": [], "ts": 0.0}
+        self._movers_cache_duration = 45
     
     def _get_spot_data(self) -> pd.DataFrame:
         now = time.time()
@@ -33,6 +43,46 @@ class MarketData:
                     self._spot_cache = pd.DataFrame()
             self._spot_cache_time = now
         return self._spot_cache
+
+    @staticmethod
+    def _to_tushare_code(stock_code: str) -> str:
+        code = (stock_code or "").strip().upper()
+        if not code:
+            return ""
+        if "." in code:
+            return code
+        if code.startswith(("6", "9")):
+            return f"{code}.SH"
+        return f"{code}.SZ"
+
+    @staticmethod
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        try:
+            if value is None or (isinstance(value, str) and not value.strip()):
+                return default
+            if pd.isna(value):
+                return default
+            return float(value)
+        except Exception:
+            return default
+
+    def _get_tushare_module_and_pro(self):
+        if self._tushare_ready:
+            return self._tushare_module, self._tushare_pro
+        self._tushare_ready = True
+        token = (config.TUSHARE_TOKEN or "").strip()
+        if not token:
+            return None, None
+        try:
+            ts = importlib.import_module("tushare")
+            ts.set_token(token)
+            self._tushare_module = ts
+            self._tushare_pro = ts.pro_api(token)
+        except Exception as e:
+            print(f"[MarketData] 初始化 tushare 失败: {e}")
+            self._tushare_module = None
+            self._tushare_pro = None
+        return self._tushare_module, self._tushare_pro
     
     def get_indices(self) -> List[Dict[str, Any]]:
         try:
@@ -97,8 +147,109 @@ class MarketData:
     
     def get_north_flow(self) -> Dict[str, Any]:
         """获取北向资金"""
-        # 北向资金接口暂不可用，返回空数据
-        return {'north': 0, 'south': 0}
+        now = time.time()
+        if (now - self._north_flow_cache.get("ts", 0)) <= self._north_flow_cache_duration:
+            return self._north_flow_cache.get("data", {'north': 0, 'south': 0})
+
+        _, pro = self._get_tushare_module_and_pro()
+        if pro is None:
+            return {'north': 0, 'south': 0, 'trade_date': '', 'source': 'fallback'}
+
+        today = datetime.now().strftime('%Y%m%d')
+        week_ago = (datetime.now() - timedelta(days=10)).strftime('%Y%m%d')
+        param_candidates = [
+            {'trade_date': today},
+            {'start_date': week_ago, 'end_date': today, 'limit': 1},
+            {'limit': 1},
+        ]
+        for params in param_candidates:
+            try:
+                df = pro.query('moneyflow_hsgt', **params)
+                if df is None or df.empty:
+                    continue
+                row = df.iloc[0]
+                north = self._safe_float(row.get('north_money'))
+                south = self._safe_float(row.get('south_money'))
+                result = {
+                    'north': north,
+                    'south': south,
+                    'north_money': north,
+                    'south_money': south,
+                    'trade_date': str(row.get('trade_date', '')),
+                    'source': 'tushare.moneyflow_hsgt',
+                }
+                self._north_flow_cache = {"data": result, "ts": now}
+                return result
+            except Exception as e:
+                print(f"[MarketData] 获取北向资金失败 ({params}): {e}")
+
+        return {'north': 0, 'south': 0, 'trade_date': '', 'source': 'fallback'}
+
+    def get_realtime_movers(self, stock_codes: List[str], limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        基于关注池获取实时异动榜（按涨跌幅绝对值排序）
+
+        注意：这里使用 realtime_quote 获取关注池实时价格，避免 realtime_list 全市场抓取过慢。
+        """
+        ts_module, _ = self._get_tushare_module_and_pro()
+        if ts_module is None:
+            return []
+
+        normalized_codes: List[str] = []
+        seen = set()
+        for code in stock_codes or []:
+            ts_code = self._to_tushare_code(str(code))
+            if not ts_code or ts_code in seen:
+                continue
+            seen.add(ts_code)
+            normalized_codes.append(ts_code)
+            if len(normalized_codes) >= 200:
+                break
+
+        if not normalized_codes:
+            return []
+
+        cache_key = ",".join(normalized_codes)
+        now = time.time()
+        if (
+            self._movers_cache.get("key") == cache_key
+            and (now - self._movers_cache.get("ts", 0)) <= self._movers_cache_duration
+        ):
+            return self._movers_cache.get("data", [])[:limit]
+
+        try:
+            df = ts_module.realtime_quote(ts_code=cache_key)
+            if df is None or df.empty:
+                return []
+            movers: List[Dict[str, Any]] = []
+            for _, row in df.iterrows():
+                ts_code = str(row.get('TS_CODE', '')).strip()
+                name = str(row.get('NAME', '')).strip()
+                price = self._safe_float(row.get('PRICE'))
+                pre_close = self._safe_float(row.get('PRE_CLOSE'))
+                pct_change = self._safe_float(row.get('PCT_CHANGE'))
+                if pct_change == 0 and price and pre_close:
+                    pct_change = (price - pre_close) / pre_close * 100
+                movers.append(
+                    {
+                        'ts_code': ts_code,
+                        'name': name,
+                        'price': price,
+                        'pre_close': pre_close,
+                        'pct_change': pct_change,
+                        'change': self._safe_float(row.get('CHANGE')),
+                        'volume': self._safe_float(row.get('VOLUME')),
+                        'amount': self._safe_float(row.get('AMOUNT')),
+                        'time': str(row.get('TIME', '')),
+                    }
+                )
+            movers.sort(key=lambda x: abs(self._safe_float(x.get('pct_change'))), reverse=True)
+            ranked = movers[: max(limit, 1)]
+            self._movers_cache = {"key": cache_key, "data": ranked, "ts": now}
+            return ranked
+        except Exception as e:
+            print(f"[MarketData] 获取实时异动榜失败: {e}")
+            return []
     
     def get_news(self, limit: int = 10, enabled_sources: list = None) -> List[Dict[str, str]]:
         """获取财经新闻（多源采集，akshare 兜底）"""

@@ -1,10 +1,8 @@
-"""
-板块数据模块 - 板块价值评分与推荐
-"""
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import time
 
+from backend.logging_config import logger
 from backend.data import akshare_patch
 
 akshare_patch.patch()
@@ -25,16 +23,16 @@ class SectorData:
         # 优先尝试同花顺数据源（更稳定）
         sectors = self._get_sector_list_ths()
         if sectors:
-            print(f"[SectorData] 获取板块列表完成，共 {len(sectors)} 个")
+            logger.info(f"获取板块列表完成，共 {len(sectors)} 个")
             return sectors
 
         # 备选：东方财富数据源
         sectors = self._get_sector_list_em()
         if sectors:
-            print(f"[SectorData] 获取板块列表完成，共 {len(sectors)} 个")
+            logger.info(f"获取板块列表完成，共 {len(sectors)} 个")
             return sectors
 
-        print("[SectorData] 获取板块列表完成，共 0 个")
+        logger.warning("获取板块列表完成，共 0 个")
         return []
 
     def _get_sector_list_ths(self) -> List[Dict[str, Any]]:
@@ -56,7 +54,7 @@ class SectorData:
                 return sectors
             except Exception as e:
                 if attempt < max_retries - 1:
-                    print(f"  同花顺尝试 {attempt + 1} 失败: {str(e)[:60]}, 重试...")
+                    logger.warning(f"同花顺尝试 {attempt + 1} 失败: {str(e)[:60]}, 重试...")
                     time.sleep(retry_delay)
         return []
 
@@ -78,7 +76,7 @@ class SectorData:
                 return sectors
             except Exception as e:
                 if attempt < max_retries - 1:
-                    print(f"  东方财富尝试 {attempt + 1} 失败: {str(e)[:60]}, 重试...")
+                    logger.warning(f"东方财富尝试 {attempt + 1} 失败: {str(e)[:60]}, 重试...")
                     time.sleep(retry_delay)
         return []
 
@@ -96,7 +94,7 @@ class SectorData:
         # 1. 查缓存
         cached = self._db.get_sector_stocks(sector_name, trade_date)
         if cached:
-            print(f"[SectorData] {sector_name} 使用缓存 ({len(cached)}只)")
+            logger.info(f"{sector_name} 使用缓存 ({len(cached)}只)")
             return [
                 {'code': s.stock_code, 'name': s.stock_name,
                  'price': s.price, 'change': s.change_pct}
@@ -104,14 +102,14 @@ class SectorData:
             ]
 
         # 2. 从 akshare 拉取
-        print(f"[SectorData] 从API获取 {sector_name} 成分股...")
+        logger.info(f"从API获取 {sector_name} 成分股...")
         stocks = self._fetch_sector_stocks_from_api(sector_name)
 
         # 3. 存入缓存
         if stocks:
             self._db.save_sector_stocks(sector_name, trade_date, stocks)
 
-        print(f"[SectorData] {sector_name} 成分股 {len(stocks)} 只")
+        logger.info(f"{sector_name} 成分股 {len(stocks)} 只")
         return stocks
 
     def get_sector_stocks_with_history(self, sector_name: str) -> List[Dict[str, Any]]:
@@ -131,7 +129,7 @@ class SectorData:
         cached = self._db.get_sector_stocks(sector_name)
         if cached:
             cache_date = cached[0].trade_date
-            print(f"[SectorData] {sector_name} 使用历史缓存 ({len(cached)}只, {cache_date})")
+            logger.info(f"{sector_name} 使用历史缓存 ({len(cached)}只, {cache_date})")
             return [
                 {'code': s.stock_code, 'name': s.stock_name,
                  'price': s.price, 'change': s.change_pct}
@@ -148,7 +146,7 @@ class SectorData:
             return stocks
 
         # 备选：使用历史缓存数据（最近一次的数据）
-        print(f"[SectorData] 无法从 API 获取 {sector_name}，尝试使用历史缓存...")
+        logger.warning(f"无法从 API 获取 {sector_name}，尝试使用历史缓存...")
         cached = self._db.get_sector_stocks(sector_name)
         if cached:
             cache_date = cached[0].trade_date if cached else "未知"
@@ -157,10 +155,10 @@ class SectorData:
                  'price': s.price, 'change': s.change_pct}
                 for s in cached[:20]
             ]
-            print(f"[SectorData] 使用历史缓存数据 (date: {cache_date}, count: {len(stocks)})")
+            logger.info(f"使用历史缓存数据 (date: {cache_date}, count: {len(stocks)})")
             return stocks
 
-        print(f"[SectorData] 未能获取 {sector_name} 的成分股（无历史缓存）")
+        logger.warning(f"未能获取 {sector_name} 的成分股（无历史缓存）")
         return []
 
     def _fetch_sector_stocks_em(self, sector_name: str) -> List[Dict[str, Any]]:
@@ -182,23 +180,25 @@ class SectorData:
                 return stocks
             except Exception as e:
                 if attempt < max_retries - 1:
-                    print(f"  获取成分股尝试 {attempt + 1} 失败 ({sector_name}): {str(e)[:60]}, 重试...")
+                    logger.warning(f"获取成分股尝试 {attempt + 1} 失败 ({sector_name}): {str(e)[:60]}, 重试...")
                     time.sleep(retry_delay)
         return []
 
     def get_sector_fund_flow(self, sector_name: str) -> Dict[str, Any]:
         try:
             df = ak.stock_fund_flow_industry()
+            if df is None or df.empty:
+                return {'main_inflow': 0, 'main_inflow_pct': 0}
             row = df[df['行业'] == sector_name]
             if not row.empty:
                 r = row.iloc[0]
                 inflow = float(r['净额']) if pd.notna(r.get('净额')) else 0
                 pct = float(r.get('行业-涨跌幅', 0)) or 0
                 result = {'main_inflow': inflow * 10000, 'main_inflow_pct': pct}
-                print(f"[SectorData] {sector_name} 资金净流入: {inflow:.2f}亿")
+                logger.info(f"{sector_name} 资金净流入: {inflow:.2f}亿")
                 return result
         except Exception as e:
-            print(f"[SectorData] 获取板块资金流向失败: {e}")
+            logger.error(f"获取板块资金流向失败: {e}")
         return {'main_inflow': 0, 'main_inflow_pct': 0}
 
     def score_sector(self, sector_name: str) -> Dict[str, Any]:
@@ -277,32 +277,122 @@ class SectorData:
 
         return results
 
+    def recommend_stocks_for_sector(
+        self,
+        sector_name: str,
+        trade_date: str = None,
+        min_count: int = 3,
+        max_count: int = 5,
+        allow_history: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """
+        按板块推荐个股（优先上涨，空缺时回退到相对抗跌个股）
+        """
+        if max_count < min_count:
+            max_count = min_count
+
+        stocks = self.get_sector_stocks(sector_name, trade_date)
+        if not stocks and allow_history:
+            stocks = self.get_sector_stocks_with_history(sector_name)
+
+        normalized: List[Dict[str, Any]] = []
+        for stock in stocks:
+            code = str(stock.get("code", "")).strip()
+            name = str(stock.get("name", "")).strip()
+            if not code or not name:
+                continue
+            try:
+                price = float(stock.get("price", 0) or 0)
+            except Exception:
+                price = 0
+            try:
+                change = float(stock.get("change", 0) or 0)
+            except Exception:
+                change = 0
+            if price <= 0:
+                continue
+            normalized.append(
+                {
+                    "code": code,
+                    "name": name,
+                    "price": price,
+                    "change": change,
+                }
+            )
+
+        if not normalized:
+            return []
+
+        positive = sorted(
+            [s for s in normalized if s["change"] > 0],
+            key=lambda s: s["change"],
+            reverse=True,
+        )
+        non_positive = sorted(
+            [s for s in normalized if s["change"] <= 0],
+            key=lambda s: s["change"],
+            reverse=True,
+        )
+
+        selected: List[Dict[str, Any]] = []
+        selected_codes: set[str] = set()
+
+        for stock in positive:
+            if len(selected) >= max_count:
+                break
+            selected.append(stock)
+            selected_codes.add(stock["code"])
+
+        if len(selected) < min_count:
+            for stock in non_positive:
+                if stock["code"] in selected_codes:
+                    continue
+                selected.append(stock)
+                selected_codes.add(stock["code"])
+                if len(selected) >= min_count:
+                    break
+
+        if len(selected) < max_count:
+            for stock in non_positive:
+                if stock["code"] in selected_codes:
+                    continue
+                selected.append(stock)
+                selected_codes.add(stock["code"])
+                if len(selected) >= max_count:
+                    break
+
+        recommended: List[Dict[str, Any]] = []
+        for stock in selected:
+            change = stock["change"]
+            if change > 0:
+                reason = f"板块内领涨{change:.1f}%"
+            elif change < 0:
+                reason = f"板块内相对抗跌{change:.1f}%"
+            else:
+                reason = "板块内相对稳健"
+            recommended.append(
+                {
+                    "code": stock["code"],
+                    "name": stock["name"],
+                    "price": stock["price"],
+                    "change": change,
+                    "reason": reason,
+                }
+            )
+        return recommended
+
     def pick_candidates_for_sector(self, sector_name: str, min_count: int = 3,
                                    trade_date: str = None) -> List[Dict[str, Any]]:
         """
-        板块内候选股票筛选（优先使用缓存）
+        板块内候选股票筛选（兼容旧接口，委托推荐逻辑）
         """
-        stocks = self.get_sector_stocks(sector_name, trade_date)
-        candidates = []
-
-        for stock in stocks:
-            if stock['price'] <= 0:
-                continue
-
-            # 按涨幅过滤，取前排股票
-            if stock['change'] > 0:
-                candidates.append({
-                    'code': stock['code'],
-                    'name': stock['name'],
-                    'price': stock['price'],
-                    'change': stock['change'],
-                    'reason': f"板块内领涨{stock['change']:.1f}%"
-                })
-
-            if len(candidates) >= min_count:
-                break
-
-        return candidates
+        return self.recommend_stocks_for_sector(
+            sector_name=sector_name,
+            trade_date=trade_date,
+            min_count=min_count,
+            max_count=min_count,
+            allow_history=True,
+        )
 
 
 sector_data = SectorData()
