@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Query
 
+from backend.evaluation.recommendation_evaluator import recommendation_evaluator
 from backend.evaluation.sector_evaluator import sector_evaluator
 
 
@@ -55,5 +56,81 @@ def get_details(prediction_date: str | None = None, limit: int = Query(default=2
             }
         )
 
+    return {"items": items}
+
+
+@router.post("/recommendations/run")
+def run_recommendation_evaluation(
+    recommendation_date: str | None = None,
+    recent_days: int = Query(default=30, ge=1, le=365),
+):
+    if recommendation_date:
+        evaluated = recommendation_evaluator.evaluate_for_date(recommendation_date)
+        return {"mode": "single_date", "recommendation_date": recommendation_date, "evaluated": evaluated}
+    evaluated = recommendation_evaluator.evaluate_recent(recent_days)
+    return {"mode": "recent_days", "recent_days": recent_days, "evaluated": evaluated}
+
+
+@router.get("/recommendations/summary")
+def get_recommendation_summary(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    recommendation_type: str | None = None,
+    source: str | None = None,
+    sector_name: str | None = None,
+):
+    summary = recommendation_evaluator.get_summary(
+        start_date=start_date,
+        end_date=end_date,
+        recommendation_type=recommendation_type,
+        source=source,
+        sector_name=sector_name,
+    )
+    return {"summary": summary}
+
+
+@router.get("/recommendations/details")
+def get_recommendation_details(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    recommendation_type: str | None = None,
+    source: str | None = None,
+    sector_name: str | None = None,
+    limit: int = Query(default=500, ge=1, le=5000),
+):
+    rows = recommendation_evaluator.get_details(
+        start_date=start_date,
+        end_date=end_date,
+        recommendation_type=recommendation_type,
+        source=source,
+        sector_name=sector_name,
+        limit=limit,
+    )
+    items = []
+    for row in rows:
+        items.append(
+            {
+                "recommendation_date": row.recommendation_date,
+                "recommendation_type": row.recommendation_type,
+                "source": row.source,
+                "stock_code": row.stock_code,
+                "stock_name": row.stock_name,
+                "sector_name": row.sector_name,
+                "return_1d": row.return_1d,
+                "return_3d": row.return_3d,
+                "return_5d": row.return_5d,
+                "sector_return_1d": row.sector_return_1d,
+                "sector_return_3d": row.sector_return_3d,
+                "sector_return_5d": row.sector_return_5d,
+                "excess_return_1d": row.excess_return_1d,
+                "excess_return_3d": row.excess_return_3d,
+                "excess_return_5d": row.excess_return_5d,
+                "is_positive_1d": row.is_positive_1d,
+                "is_positive_3d": row.is_positive_3d,
+                "is_positive_5d": row.is_positive_5d,
+                "evaluated_at": row.evaluated_at,
+                "created_at": row.created_at,
+            }
+        )
     return {"items": items}
 

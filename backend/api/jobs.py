@@ -100,6 +100,10 @@ class InMemoryJobStore:
                 "auction_filtered": len(result.get("auction_filtered_out", [])),
                 "errors": result.get("errors", []),
                 "diagnostics": result.get("diagnostics", {}),
+                "diagnostics_summary": result.get("diagnostics_summary", {}),
+                "no_reco_reason_codes": (
+                    result.get("diagnostics_summary", {}) or {}
+                ).get("no_reco_reason_codes", []),
             }
             with self._lock:
                 job = self._jobs.get(task_id)

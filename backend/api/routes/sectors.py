@@ -128,10 +128,43 @@ def _build_top_stocks_from_cache(
     return top_stocks, cached[0].trade_date
 
 
+def _build_sector_candidate_stock_map(trade_date: str | None) -> Dict[str, List[Dict[str, Any]]]:
+    if not trade_date:
+        return {}
+    rows = db.get_sector_stock_recommendations(trade_date)
+    sector_map: Dict[str, List[Dict[str, Any]]] = {}
+    dedupe: Dict[str, set[str]] = {}
+    for row in rows:
+        if not row.sector_name or not row.stock_code:
+            continue
+        seen = dedupe.setdefault(row.sector_name, set())
+        if row.stock_code in seen:
+            continue
+        seen.add(row.stock_code)
+        sector_map.setdefault(row.sector_name, []).append(
+            {
+                "code": row.stock_code,
+                "name": row.stock_name,
+                "price": row.price,
+                "change": row.change_pct,
+                "score": row.score,
+                "rank": row.rank_no,
+                "reason": row.reason or "板块候选个股",
+            }
+        )
+    return sector_map
+
+
 @router.get("/latest")
 def get_latest_sectors():
-    ai_sector_analysis = db.get_latest_ai_sector_analysis()
     sector_recs = db.get_latest_sector_recommendations()
+    trade_date = sector_recs[0].trade_date if sector_recs else None
+    if trade_date:
+        ai_sector_analysis = db.get_ai_sector_analysis(trade_date)
+    else:
+        ai_sector_analysis = db.get_latest_ai_sector_analysis()
+        if ai_sector_analysis:
+            trade_date = ai_sector_analysis[0].trade_date
 
     # build map for rec reasons and scores
     score_map = {r.sector_name: r.score for r in sector_recs} if sector_recs else {}
@@ -191,18 +224,21 @@ def get_latest_sectors():
                 }
             )
 
-    # best-effort: derive latest trade_date
-    trade_date = None
-    if items:
-        trade_date = items[0].get("trade_date")
-
     signal_stock_map = _build_signal_stock_map(trade_date)
+    sector_candidate_stock_map = _build_sector_candidate_stock_map(trade_date)
     for item in items:
         sector_name = item.get("sector_name", "")
         signal_stocks = signal_stock_map.get(sector_name, [])
         if signal_stocks:
             item["top_stocks"] = signal_stocks[:5]
             item["stocks_source"] = "signal"
+            item["stocks_date"] = trade_date
+            continue
+
+        candidate_stocks = sector_candidate_stock_map.get(sector_name, [])
+        if candidate_stocks:
+            item["top_stocks"] = candidate_stocks[:5]
+            item["stocks_source"] = "sector_candidate"
             item["stocks_date"] = trade_date
             continue
 

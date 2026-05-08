@@ -175,6 +175,30 @@ class SectorStock:
         if not self.created_at:
             self.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+
+@dataclass
+class SectorStockRecommendation:
+    """板块候选个股推荐"""
+    trade_date: str = ""
+    sector_name: str = ""
+    stock_code: str = ""
+    stock_name: str = ""
+    score: float = 0.0
+    rank_no: int = 0
+    price: float = 0.0
+    change_pct: float = 0.0
+    reason: str = ""
+    factors_json: str = "[]"
+    source: str = "sector_candidate"
+    run_id: str = ""
+    strategy_version: str = ""
+    created_at: str = ""
+    id: int = 0
+
+    def __post_init__(self):
+        if not self.created_at:
+            self.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
 @dataclass
 class SectorDailyPerformance:
     """板块每日实际涨跌幅"""
@@ -207,6 +231,36 @@ class PredictionEvaluation:
     correct_t5: int = None
     evaluated_at: str = ""
     id: int = 0
+
+
+@dataclass
+class RecommendationEvaluation:
+    """推荐评估结果（个股）"""
+    recommendation_date: str = ""
+    recommendation_type: str = ""   # stock_signal / sector_candidate
+    source: str = ""                # signal / sector_candidate
+    stock_code: str = ""
+    stock_name: str = ""
+    sector_name: str = ""
+    return_1d: float = None
+    return_3d: float = None
+    return_5d: float = None
+    sector_return_1d: float = None
+    sector_return_3d: float = None
+    sector_return_5d: float = None
+    excess_return_1d: float = None
+    excess_return_3d: float = None
+    excess_return_5d: float = None
+    is_positive_1d: int = None
+    is_positive_3d: int = None
+    is_positive_5d: int = None
+    evaluated_at: str = ""
+    created_at: str = ""
+    id: int = 0
+
+    def __post_init__(self):
+        if not self.created_at:
+            self.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 @dataclass
@@ -432,6 +486,36 @@ class Database:
                 ON sector_stocks(sector_name, trade_date)
             """)
 
+            # 板块候选个股推荐结果
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sector_stock_recommendations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_date TEXT NOT NULL,
+                    sector_name TEXT NOT NULL,
+                    stock_code TEXT NOT NULL,
+                    stock_name TEXT,
+                    score REAL DEFAULT 0,
+                    rank_no INTEGER DEFAULT 0,
+                    price REAL DEFAULT 0,
+                    change_pct REAL DEFAULT 0,
+                    reason TEXT,
+                    factors_json TEXT DEFAULT '[]',
+                    source TEXT DEFAULT 'sector_candidate',
+                    run_id TEXT DEFAULT '',
+                    strategy_version TEXT DEFAULT '',
+                    created_at TEXT,
+                    UNIQUE(trade_date, sector_name, stock_code, source)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_ssr_trade_date
+                ON sector_stock_recommendations(trade_date)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_ssr_sector_date
+                ON sector_stock_recommendations(sector_name, trade_date)
+            """)
+
             # 板块每日实际涨跌幅
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS sector_daily_performance (
@@ -476,6 +560,46 @@ class Database:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_pe_date
                 ON prediction_evaluations(prediction_date)
+            """)
+
+            # 推荐评估结果（个股推荐）
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS recommendation_evaluations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    recommendation_date TEXT NOT NULL,
+                    recommendation_type TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    stock_code TEXT NOT NULL,
+                    stock_name TEXT,
+                    sector_name TEXT,
+                    return_1d REAL,
+                    return_3d REAL,
+                    return_5d REAL,
+                    sector_return_1d REAL,
+                    sector_return_3d REAL,
+                    sector_return_5d REAL,
+                    excess_return_1d REAL,
+                    excess_return_3d REAL,
+                    excess_return_5d REAL,
+                    is_positive_1d INTEGER,
+                    is_positive_3d INTEGER,
+                    is_positive_5d INTEGER,
+                    evaluated_at TEXT,
+                    created_at TEXT,
+                    UNIQUE(recommendation_date, recommendation_type, stock_code, sector_name, source)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reco_eval_date
+                ON recommendation_evaluations(recommendation_date)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reco_eval_type
+                ON recommendation_evaluations(recommendation_type, source)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reco_eval_sector
+                ON recommendation_evaluations(sector_name, recommendation_date)
             """)
 
             # 模拟交易表
@@ -936,6 +1060,91 @@ class Database:
             ).fetchall()
             return [row['sector_name'] for row in rows]
 
+    # ========== 板块候选推荐操作 ==========
+
+    def upsert_sector_stock_recommendation(self, rec: SectorStockRecommendation) -> bool:
+        """更新或插入板块候选个股推荐"""
+        with self.get_connection() as conn:
+            try:
+                conn.execute("""
+                    INSERT OR REPLACE INTO sector_stock_recommendations
+                    (trade_date, sector_name, stock_code, stock_name, score, rank_no,
+                     price, change_pct, reason, factors_json, source, run_id, strategy_version, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    rec.trade_date, rec.sector_name, rec.stock_code, rec.stock_name,
+                    rec.score, rec.rank_no, rec.price, rec.change_pct,
+                    rec.reason, rec.factors_json, rec.source, rec.run_id,
+                    rec.strategy_version, rec.created_at,
+                ))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"保存板块候选推荐失败: {e}")
+                return False
+
+    def batch_upsert_sector_stock_recommendations(self, recs: List[SectorStockRecommendation]) -> bool:
+        """批量更新或插入板块候选个股推荐"""
+        if not recs:
+            return True
+        with self.get_connection() as conn:
+            try:
+                for rec in recs:
+                    conn.execute("""
+                        INSERT OR REPLACE INTO sector_stock_recommendations
+                        (trade_date, sector_name, stock_code, stock_name, score, rank_no,
+                         price, change_pct, reason, factors_json, source, run_id, strategy_version, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        rec.trade_date, rec.sector_name, rec.stock_code, rec.stock_name,
+                        rec.score, rec.rank_no, rec.price, rec.change_pct,
+                        rec.reason, rec.factors_json, rec.source, rec.run_id,
+                        rec.strategy_version, rec.created_at,
+                    ))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"批量保存板块候选推荐失败: {e}")
+                return False
+
+    def get_sector_stock_recommendations(
+        self, trade_date: str, sector_name: Optional[str] = None
+    ) -> List[SectorStockRecommendation]:
+        """获取指定交易日的板块候选个股推荐"""
+        with self.get_connection() as conn:
+            if sector_name:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM sector_stock_recommendations
+                    WHERE trade_date = ? AND sector_name = ?
+                    ORDER BY rank_no ASC, score DESC
+                    """,
+                    (trade_date, sector_name),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM sector_stock_recommendations
+                    WHERE trade_date = ?
+                    ORDER BY sector_name ASC, rank_no ASC, score DESC
+                    """,
+                    (trade_date,),
+                ).fetchall()
+            return [SectorStockRecommendation(**dict(row)) for row in rows]
+
+    def get_latest_sector_stock_recommendations(
+        self, sector_name: Optional[str] = None
+    ) -> List[SectorStockRecommendation]:
+        """获取最新交易日的板块候选个股推荐"""
+        with self.get_connection() as conn:
+            latest = conn.execute(
+                "SELECT MAX(trade_date) as latest FROM sector_stock_recommendations"
+            ).fetchone()
+            if not latest or not latest["latest"]:
+                return []
+            latest_date = latest["latest"]
+        return self.get_sector_stock_recommendations(latest_date, sector_name=sector_name)
+
     # ========== 板块每日涨跌幅操作 ==========
 
     def upsert_sector_daily_performance(self, perf: SectorDailyPerformance) -> bool:
@@ -1070,6 +1279,136 @@ class Database:
                 "SELECT DISTINCT prediction_date FROM prediction_evaluations ORDER BY prediction_date DESC"
             ).fetchall()
             return [row['prediction_date'] for row in rows]
+
+    # ========== 推荐评估操作 ==========
+
+    def upsert_recommendation_evaluation(self, ev: RecommendationEvaluation) -> bool:
+        """更新或插入推荐评估"""
+        with self.get_connection() as conn:
+            try:
+                conn.execute("""
+                    INSERT OR REPLACE INTO recommendation_evaluations
+                    (recommendation_date, recommendation_type, source, stock_code, stock_name, sector_name,
+                     return_1d, return_3d, return_5d,
+                     sector_return_1d, sector_return_3d, sector_return_5d,
+                     excess_return_1d, excess_return_3d, excess_return_5d,
+                     is_positive_1d, is_positive_3d, is_positive_5d,
+                     evaluated_at, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    ev.recommendation_date, ev.recommendation_type, ev.source,
+                    ev.stock_code, ev.stock_name, ev.sector_name,
+                    ev.return_1d, ev.return_3d, ev.return_5d,
+                    ev.sector_return_1d, ev.sector_return_3d, ev.sector_return_5d,
+                    ev.excess_return_1d, ev.excess_return_3d, ev.excess_return_5d,
+                    ev.is_positive_1d, ev.is_positive_3d, ev.is_positive_5d,
+                    ev.evaluated_at, ev.created_at,
+                ))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"保存推荐评估失败: {e}")
+                return False
+
+    def batch_upsert_recommendation_evaluations(self, evs: List[RecommendationEvaluation]) -> bool:
+        """批量更新或插入推荐评估"""
+        if not evs:
+            return True
+        with self.get_connection() as conn:
+            try:
+                for ev in evs:
+                    conn.execute("""
+                        INSERT OR REPLACE INTO recommendation_evaluations
+                        (recommendation_date, recommendation_type, source, stock_code, stock_name, sector_name,
+                         return_1d, return_3d, return_5d,
+                         sector_return_1d, sector_return_3d, sector_return_5d,
+                         excess_return_1d, excess_return_3d, excess_return_5d,
+                         is_positive_1d, is_positive_3d, is_positive_5d,
+                         evaluated_at, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        ev.recommendation_date, ev.recommendation_type, ev.source,
+                        ev.stock_code, ev.stock_name, ev.sector_name,
+                        ev.return_1d, ev.return_3d, ev.return_5d,
+                        ev.sector_return_1d, ev.sector_return_3d, ev.sector_return_5d,
+                        ev.excess_return_1d, ev.excess_return_3d, ev.excess_return_5d,
+                        ev.is_positive_1d, ev.is_positive_3d, ev.is_positive_5d,
+                        ev.evaluated_at, ev.created_at,
+                    ))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"批量保存推荐评估失败: {e}")
+                return False
+
+    def get_recommendation_evaluations(
+        self,
+        recommendation_date: str | None = None,
+        recommendation_type: str | None = None,
+        source: str | None = None,
+        sector_name: str | None = None,
+        limit: int = 500,
+    ) -> List[RecommendationEvaluation]:
+        """查询推荐评估结果"""
+        sql = "SELECT * FROM recommendation_evaluations WHERE 1=1"
+        params: list = []
+        if recommendation_date:
+            sql += " AND recommendation_date = ?"
+            params.append(recommendation_date)
+        if recommendation_type:
+            sql += " AND recommendation_type = ?"
+            params.append(recommendation_type)
+        if source:
+            sql += " AND source = ?"
+            params.append(source)
+        if sector_name:
+            sql += " AND sector_name = ?"
+            params.append(sector_name)
+        sql += " ORDER BY recommendation_date DESC, recommendation_type, source, stock_code LIMIT ?"
+        params.append(limit)
+
+        with self.get_connection() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+            return [RecommendationEvaluation(**dict(row)) for row in rows]
+
+    def get_recommendation_evaluations_range(
+        self,
+        start_date: str,
+        end_date: str,
+        recommendation_type: str | None = None,
+        source: str | None = None,
+        sector_name: str | None = None,
+        limit: int = 5000,
+    ) -> List[RecommendationEvaluation]:
+        """按日期范围查询推荐评估结果"""
+        sql = """
+            SELECT * FROM recommendation_evaluations
+            WHERE recommendation_date >= ? AND recommendation_date <= ?
+        """
+        params: list = [start_date, end_date]
+        if recommendation_type:
+            sql += " AND recommendation_type = ?"
+            params.append(recommendation_type)
+        if source:
+            sql += " AND source = ?"
+            params.append(source)
+        if sector_name:
+            sql += " AND sector_name = ?"
+            params.append(sector_name)
+        sql += " ORDER BY recommendation_date DESC, recommendation_type, source, stock_code LIMIT ?"
+        params.append(limit)
+
+        with self.get_connection() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+            return [RecommendationEvaluation(**dict(row)) for row in rows]
+
+    def get_all_recommendation_dates(self) -> List[str]:
+        """获取所有有推荐评估的日期"""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT recommendation_date FROM recommendation_evaluations ORDER BY recommendation_date DESC"
+            ).fetchall()
+            return [row["recommendation_date"] for row in rows]
 
     # ========== 模拟交易操作 ==========
 

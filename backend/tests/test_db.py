@@ -24,6 +24,8 @@ class TestDatabaseTables:
                 ).fetchall()]
             assert "market_snapshots" in tables
             assert "sector_recommendations" in tables
+            assert "sector_stock_recommendations" in tables
+            assert "recommendation_evaluations" in tables
             assert "stock_signals" in tables
             assert "followed_stocks" in tables
             assert "analysis_records" in tables
@@ -227,6 +229,161 @@ class TestStockSignal:
             assert len(results) == 1
             assert results[0].signal == "buy"
             assert results[0].confidence == 0.9
+
+
+class TestSectorStockRecommendation:
+    def test_upsert_and_get_latest(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            os.environ["DB_PATH"] = db_path
+            if 'backend.data.db' in sys.modules:
+                del sys.modules['backend.data.db']
+            if 'backend.config' in sys.modules:
+                del sys.modules['backend.config']
+            from backend.data.db import Database, SectorStockRecommendation
+            db = Database(db_path)
+
+            rec = SectorStockRecommendation(
+                trade_date="2024-01-15",
+                sector_name="电池",
+                stock_code="300750",
+                stock_name="宁德时代",
+                score=3.2,
+                rank_no=1,
+                price=180.5,
+                change_pct=2.1,
+                reason="板块内领涨2.1%",
+                source="sector_candidate",
+                run_id="run_a",
+                strategy_version="v1",
+            )
+            ok = db.upsert_sector_stock_recommendation(rec)
+            assert ok is True
+
+            rows = db.get_latest_sector_stock_recommendations()
+            assert len(rows) == 1
+            assert rows[0].stock_code == "300750"
+            assert rows[0].sector_name == "电池"
+            assert rows[0].rank_no == 1
+
+    def test_batch_upsert_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            os.environ["DB_PATH"] = db_path
+            if 'backend.data.db' in sys.modules:
+                del sys.modules['backend.data.db']
+            if 'backend.config' in sys.modules:
+                del sys.modules['backend.config']
+            from backend.data.db import Database, SectorStockRecommendation
+            db = Database(db_path)
+
+            recs = [
+                SectorStockRecommendation(
+                    trade_date="2024-01-15",
+                    sector_name="电池",
+                    stock_code="300750",
+                    stock_name="宁德时代",
+                    score=3.2,
+                    rank_no=1,
+                    source="sector_candidate",
+                ),
+                SectorStockRecommendation(
+                    trade_date="2024-01-15",
+                    sector_name="电池",
+                    stock_code="300274",
+                    stock_name="阳光电源",
+                    score=2.6,
+                    rank_no=2,
+                    source="sector_candidate",
+                ),
+            ]
+            assert db.batch_upsert_sector_stock_recommendations(recs) is True
+            # 同批次重复写入，记录数不应增加
+            assert db.batch_upsert_sector_stock_recommendations(recs) is True
+
+            rows = db.get_sector_stock_recommendations("2024-01-15", sector_name="电池")
+            assert len(rows) == 2
+            assert rows[0].stock_code == "300750"
+            assert rows[1].stock_code == "300274"
+
+
+class TestRecommendationEvaluation:
+    def test_upsert_and_query(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            os.environ["DB_PATH"] = db_path
+            if 'backend.data.db' in sys.modules:
+                del sys.modules['backend.data.db']
+            if 'backend.config' in sys.modules:
+                del sys.modules['backend.config']
+            from backend.data.db import Database, RecommendationEvaluation
+            db = Database(db_path)
+
+            row = RecommendationEvaluation(
+                recommendation_date="2024-01-15",
+                recommendation_type="stock_signal",
+                source="signal",
+                stock_code="600519",
+                stock_name="贵州茅台",
+                sector_name="白酒",
+                return_1d=1.2,
+                return_3d=2.5,
+                return_5d=3.1,
+                excess_return_1d=0.4,
+                excess_return_3d=0.8,
+                excess_return_5d=1.1,
+                is_positive_1d=1,
+                is_positive_3d=1,
+                is_positive_5d=1,
+                evaluated_at="2024-01-20 10:00:00",
+            )
+            assert db.upsert_recommendation_evaluation(row) is True
+
+            rows = db.get_recommendation_evaluations(
+                recommendation_date="2024-01-15",
+                recommendation_type="stock_signal",
+            )
+            assert len(rows) == 1
+            assert rows[0].stock_code == "600519"
+            assert rows[0].return_5d == 3.1
+
+    def test_range_query_filters(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            os.environ["DB_PATH"] = db_path
+            if 'backend.data.db' in sys.modules:
+                del sys.modules['backend.data.db']
+            if 'backend.config' in sys.modules:
+                del sys.modules['backend.config']
+            from backend.data.db import Database, RecommendationEvaluation
+            db = Database(db_path)
+
+            rows = [
+                RecommendationEvaluation(
+                    recommendation_date="2024-01-15",
+                    recommendation_type="stock_signal",
+                    source="signal",
+                    stock_code="600519",
+                    stock_name="贵州茅台",
+                    sector_name="白酒",
+                ),
+                RecommendationEvaluation(
+                    recommendation_date="2024-01-16",
+                    recommendation_type="sector_candidate",
+                    source="sector_candidate",
+                    stock_code="300750",
+                    stock_name="宁德时代",
+                    sector_name="电池",
+                ),
+            ]
+            assert db.batch_upsert_recommendation_evaluations(rows) is True
+            queried = db.get_recommendation_evaluations_range(
+                "2024-01-16",
+                "2024-01-20",
+                recommendation_type="sector_candidate",
+            )
+            assert len(queried) == 1
+            assert queried[0].stock_code == "300750"
 
 
 class TestBackwardCompatibility:

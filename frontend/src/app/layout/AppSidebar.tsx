@@ -13,6 +13,29 @@ const NAV_ICONS: Record<NavKey, React.ReactNode> = {
   evaluation: <FileText size={18} />,
 };
 
+type JobResultSummary = NonNullable<JobResponse['result_summary']>;
+
+const REASON_CODE_LABELS: Record<string, string> = {
+  PIPELINE_STAGE_ERROR: '链路阶段异常',
+  NO_SECTOR_RECOMMENDATIONS: '未生成板块推荐',
+  NO_CONSTITUENTS: '未获取到板块成分股',
+  AUCTION_FILTERED: '候选股被竞价过滤',
+  FINANCIAL_FILTERED: '候选股被业绩过滤',
+  KLINE_INSUFFICIENT: 'K线数据不足',
+  ALL_HOLD: '技术信号均为持有',
+  NO_ELIGIBLE_SIGNALS: '暂无满足条件信号',
+};
+
+const STAGE_LABELS: Record<string, string> = {
+  market_snapshot: '市场快照',
+  sector_performance: '板块涨跌幅',
+  ai_news_generation: 'AI新闻生成',
+  ai_sector_analysis: 'AI板块分析',
+  sector_scoring: '板块评分',
+  candidate_pick: '候选筛选',
+  signal_generation: '信号生成',
+};
+
 export function AppSidebar(props: {
   active: NavKey;
   onNavigate: (key: NavKey) => void;
@@ -27,6 +50,7 @@ export function AppSidebar(props: {
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobError, setJobError] = useState<string | null>(null);
+  const [jobSummary, setJobSummary] = useState<JobResultSummary | null>(null);
   const pollingRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -43,6 +67,7 @@ export function AppSidebar(props: {
       try {
         const j = await apiGet<JobResponse>(`/api/jobs/${taskId}`);
         setJobStatus(j.status);
+        setJobSummary(j.result_summary ?? null);
         if (j.status === 'failed') {
           setJobError(j.error ?? '执行失败');
           if (pollingRef.current) window.clearInterval(pollingRef.current);
@@ -61,6 +86,7 @@ export function AppSidebar(props: {
 
   const onRunAnalysis = async () => {
     setJobError(null);
+    setJobSummary(null);
     try {
       const r = await apiPost<CreateJobResponse>('/api/jobs/analysis', {
         // 默认触发完整链路：新闻采集 -> AI分析 -> 板块推荐 -> 个股信号
@@ -261,6 +287,7 @@ export function AppSidebar(props: {
         状态：{jobStatus ?? '—'} {jobId ? `(${jobId.slice(0, 6)})` : ''}
       </div>
       {jobError ? <div style={{ fontSize: 12, color: 'var(--accent-red)' }}>{jobError}</div> : null}
+      {jobSummary ? <JobDiagnosticsPanel summary={jobSummary} /> : null}
 
       <div style={{ flex: 1, minHeight: 16 }} />
 
@@ -320,6 +347,88 @@ export function AppSidebar(props: {
       </div>
     </div>
   );
+}
+
+function JobDiagnosticsPanel(props: { summary: JobResultSummary }) {
+  const diagnosticsSummary = props.summary.diagnostics_summary ?? {};
+  const reasonCodes = Array.isArray(diagnosticsSummary.no_reco_reason_codes)
+    ? diagnosticsSummary.no_reco_reason_codes
+    : [];
+  const stageErrors = Array.isArray(diagnosticsSummary.stage_errors)
+    ? diagnosticsSummary.stage_errors
+    : [];
+  const candidateCounts = diagnosticsSummary.candidate_counts ?? {};
+  const signalCounts = diagnosticsSummary.signal_counts ?? {};
+
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        border: '1px solid var(--border-color)',
+        borderRadius: 10,
+        padding: '10px 12px',
+        background: 'var(--bg-secondary)',
+        display: 'grid',
+        gap: 8,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>链路诊断</div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          {props.summary.trade_date ? `交易日 ${props.summary.trade_date}` : '任务完成'}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gap: 4, fontSize: 11, color: 'var(--text-secondary)' }}>
+        <div>候选：{toCount(candidateCounts.after_financial)}/{toCount(candidateCounts.before_auction)}（过滤竞价 {toCount(candidateCounts.auction_filtered)}，过滤业绩 {toCount(candidateCounts.financial_filtered)}）</div>
+        <div>信号：输入 {toCount(signalCounts.candidates_input)}，K线可用 {toCount(signalCounts.kline_success_count)}，买入信号 {toCount(signalCounts.buy_signal_count)}</div>
+      </div>
+
+      {reasonCodes.length > 0 ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {reasonCodes.map((code) => (
+            <span
+              key={code}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '2px 8px',
+                borderRadius: 999,
+                border: '1px solid var(--border-color)',
+                background: 'var(--bg-card)',
+                color: 'var(--text-secondary)',
+                fontSize: 11,
+                fontWeight: 600,
+              }}
+            >
+              {REASON_CODE_LABELS[code] ?? code}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div style={{ fontSize: 11, color: 'var(--accent-blue)' }}>已生成买入信号，可进入个股页查看详情。</div>
+      )}
+
+      {stageErrors.length > 0 ? (
+        <div style={{ display: 'grid', gap: 4 }}>
+          {stageErrors.slice(0, 2).map((stageErr, idx) => (
+            <div key={`${stageErr.stage}-${idx}`} style={{ fontSize: 11, color: 'var(--accent-red)' }}>
+              {`${STAGE_LABELS[stageErr.stage] ?? stageErr.stage}: ${stageErr.error}`}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function toCount(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
 }
 
 function ChartPaletteBtn(props: {

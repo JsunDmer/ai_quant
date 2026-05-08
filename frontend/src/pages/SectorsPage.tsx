@@ -133,6 +133,8 @@ export function SectorsPage(props: { refreshKey: number }) {
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                       {String(it.stocks_source ?? '') === 'signal'
                         ? '来源：技术信号'
+                        : String(it.stocks_source ?? '') === 'sector_candidate'
+                          ? '来源：板块候选'
                         : String(it.stocks_source ?? '') === 'sector_cache'
                           ? '来源：板块成分股'
                           : '来源：暂无'}

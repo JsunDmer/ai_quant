@@ -19,6 +19,27 @@ export type JobResponse = {
     trade_date?: string;
     data_date?: string;
     errors?: string[];
+    diagnostics?: Record<string, unknown>;
+    diagnostics_summary?: {
+      has_stock_signals?: boolean;
+      no_reco_reason_codes?: string[];
+      stage_errors?: Array<{ stage: string; error: string }>;
+      candidate_counts?: {
+        selected_sector_count?: number;
+        before_auction?: number;
+        after_auction?: number;
+        after_financial?: number;
+        auction_filtered?: number;
+        financial_filtered?: number;
+      };
+      signal_counts?: {
+        candidates_input?: number;
+        kline_success_count?: number;
+        kline_insufficient_count?: number;
+        buy_signal_count?: number;
+      };
+    };
+    no_reco_reason_codes?: string[];
   } | null;
 };
 

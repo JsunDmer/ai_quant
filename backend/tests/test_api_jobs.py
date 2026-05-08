@@ -45,6 +45,8 @@ def test_job_lifecycle_smoke(monkeypatch):
     assert p2["result_summary"]["sector_top_stocks"] == 1
     assert p2["result_summary"]["signals"] == 0
     assert p2["result_summary"]["diagnostics"]["candidate_pick"]["candidate_count_after_auction"] == 1
+    assert p2["result_summary"]["diagnostics_summary"] == {}
+    assert p2["result_summary"]["no_reco_reason_codes"] == []
 
 
 def test_job_failure_records_error(monkeypatch):
