@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
+import type { EChartsOption } from 'echarts';
 import { apiGet, apiPost } from '../api/client';
 import { PageHeader } from '../app/layout/PageHeader';
+import { EChart } from '../charts/EChart';
+import { getChartTokens, type ChartPalette } from '../charts/chartTokens';
 
 type AccuracyBucket = {
   total?: number;
@@ -47,10 +50,24 @@ type RecommendationDetail = {
   return_5d: number | null;
 };
 
-export function EvaluationPage(props: { refreshKey: number }) {
+type RecommendationCompareItem = {
+  recommendation_type: string;
+  source: string;
+  sample_count: number;
+  hit_rate_1d: number;
+  hit_rate_3d: number;
+  hit_rate_5d: number;
+  avg_return_1d: number;
+  avg_return_3d: number;
+  avg_return_5d: number;
+  avg_excess_return_5d: number;
+};
+
+export function EvaluationPage(props: { refreshKey: number; chartPalette: ChartPalette }) {
   const [summary, setSummary] = useState<SectorSummary | null>(null);
   const [recommendationSummary, setRecommendationSummary] = useState<RecommendationSummary | null>(null);
   const [details, setDetails] = useState<RecommendationDetail[]>([]);
+  const [compareItems, setCompareItems] = useState<RecommendationCompareItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -101,12 +118,14 @@ export function EvaluationPage(props: { refreshKey: number }) {
       apiGet<{ summary: SectorSummary }>('/api/evaluation/summary'),
       apiGet<{ summary: RecommendationSummary }>(`/api/evaluation/recommendations/summary${querySuffix}`),
       apiGet<{ items: RecommendationDetail[] }>(`/api/evaluation/recommendations/details${detailsSuffix}`),
+      apiGet<{ items: RecommendationCompareItem[] }>(`/api/evaluation/recommendations/compare${querySuffix}`),
     ])
-      .then(([sectorResp, recoResp, detailResp]) => {
+      .then(([sectorResp, recoResp, detailResp, compareResp]) => {
         if (!alive) return;
         setSummary(sectorResp.summary ?? null);
         setRecommendationSummary(recoResp.summary ?? null);
         setDetails(detailResp.items ?? []);
+        setCompareItems(compareResp.items ?? []);
       })
       .catch(() => {
         if (!alive) return;
@@ -158,6 +177,65 @@ export function EvaluationPage(props: { refreshKey: number }) {
     setSectorName('');
     loadData(empty);
   };
+
+  const compareOption = useMemo<EChartsOption>(() => {
+    const tokens = getChartTokens(props.chartPalette);
+    const labels = compareItems.map((item) => `${item.recommendation_type}/${item.source}`);
+    const hitRateValues = compareItems.map((item) => Number(item.hit_rate_5d ?? 0));
+    const excessValues = compareItems.map((item) => Number(item.avg_excess_return_5d ?? 0));
+
+    return {
+      grid: { left: 48, right: 24, top: 38, bottom: 48 },
+      legend: {
+        top: 6,
+        textStyle: { color: tokens.textSecondary },
+      },
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: tokens.bgCard,
+        borderColor: tokens.borderColor,
+        textStyle: { color: tokens.textPrimary },
+      },
+      xAxis: {
+        type: 'category',
+        data: labels,
+        axisLabel: { color: tokens.textSecondary, interval: 0, rotate: labels.length > 4 ? 20 : 0 },
+        axisLine: { lineStyle: { color: tokens.borderColor } },
+      },
+      yAxis: [
+        {
+          type: 'value',
+          name: '5D命中率%',
+          axisLabel: { color: tokens.textSecondary },
+          splitLine: { lineStyle: { color: tokens.borderColor, type: 'dashed' } },
+        },
+        {
+          type: 'value',
+          name: '5D超额%',
+          axisLabel: { color: tokens.textSecondary },
+          splitLine: { show: false },
+        },
+      ],
+      series: [
+        {
+          name: '5D命中率',
+          type: 'bar',
+          data: hitRateValues,
+          itemStyle: { color: tokens.accentBlue, borderRadius: [4, 4, 0, 0] },
+          barMaxWidth: 30,
+        },
+        {
+          name: '5D超额收益',
+          type: 'line',
+          yAxisIndex: 1,
+          data: excessValues,
+          smooth: true,
+          lineStyle: { color: tokens.accentRed, width: 2 },
+          itemStyle: { color: tokens.accentRed },
+        },
+      ],
+    };
+  }, [compareItems, props.chartPalette]);
 
   return (
     <div>
@@ -252,6 +330,24 @@ export function EvaluationPage(props: { refreshKey: number }) {
           <div className="ui-state ui-state--muted" style={{ marginTop: 8 }}>
             暂无推荐评估数据，可点击“刷新推荐评估”计算最近 30 天结果。
           </div>
+        )}
+      </div>
+
+      <div
+        className="surface-card"
+        style={{
+          marginTop: 14,
+          borderRadius: 8,
+          padding: '12px 14px',
+        }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>
+          类型/来源对比图（5D）
+        </div>
+        {compareItems.length > 0 ? (
+          <EChart option={compareOption} chartPalette={props.chartPalette} style={{ height: 300 }} />
+        ) : (
+          <div className="ui-state ui-state--muted">暂无可对比数据。</div>
         )}
       </div>
 

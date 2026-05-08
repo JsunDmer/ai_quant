@@ -418,6 +418,99 @@ class RecommendationEvaluator:
             "t5": _metric("5d"),
         }
 
+    def get_type_source_comparison(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        recommendation_type: str | None = None,
+        source: str | None = None,
+        sector_name: str | None = None,
+    ) -> List[Dict]:
+        """按 recommendation_type/source 输出对比指标，便于前端画对比图。"""
+        rows = self._load_rows(
+            start_date=start_date,
+            end_date=end_date,
+            recommendation_type=recommendation_type,
+            source=source,
+            sector_name=sector_name,
+            limit=10000,
+        )
+        grouped: Dict[Tuple[str, str], Dict[str, List[float] | int | str]] = {}
+        for row in rows:
+            key = (str(row.recommendation_type or ""), str(row.source or ""))
+            item = grouped.setdefault(
+                key,
+                {
+                    "recommendation_type": key[0],
+                    "source": key[1],
+                    "sample_count": 0,
+                    "returns_1d": [],
+                    "returns_3d": [],
+                    "returns_5d": [],
+                    "excess_5d": [],
+                },
+            )
+            item["sample_count"] = int(item.get("sample_count", 0)) + 1
+            if row.return_1d is not None:
+                casted = item["returns_1d"]
+                if isinstance(casted, list):
+                    casted.append(float(row.return_1d))
+            if row.return_3d is not None:
+                casted = item["returns_3d"]
+                if isinstance(casted, list):
+                    casted.append(float(row.return_3d))
+            if row.return_5d is not None:
+                casted = item["returns_5d"]
+                if isinstance(casted, list):
+                    casted.append(float(row.return_5d))
+            if row.excess_return_5d is not None:
+                casted = item["excess_5d"]
+                if isinstance(casted, list):
+                    casted.append(float(row.excess_return_5d))
+
+        def _avg(values: List[float]) -> float:
+            return round(sum(values) / len(values), 4) if values else 0.0
+
+        def _hit_rate(values: List[float]) -> float:
+            if not values:
+                return 0.0
+            return round(sum(1 for v in values if v > 0) / len(values) * 100, 2)
+
+        items: List[Dict] = []
+        for value in grouped.values():
+            returns_1d = value.get("returns_1d", [])
+            returns_3d = value.get("returns_3d", [])
+            returns_5d = value.get("returns_5d", [])
+            excess_5d = value.get("excess_5d", [])
+            returns_1d = returns_1d if isinstance(returns_1d, list) else []
+            returns_3d = returns_3d if isinstance(returns_3d, list) else []
+            returns_5d = returns_5d if isinstance(returns_5d, list) else []
+            excess_5d = excess_5d if isinstance(excess_5d, list) else []
+            items.append(
+                {
+                    "recommendation_type": value.get("recommendation_type", ""),
+                    "source": value.get("source", ""),
+                    "sample_count": int(value.get("sample_count", 0)),
+                    "hit_rate_1d": _hit_rate(returns_1d),
+                    "hit_rate_3d": _hit_rate(returns_3d),
+                    "hit_rate_5d": _hit_rate(returns_5d),
+                    "avg_return_1d": _avg(returns_1d),
+                    "avg_return_3d": _avg(returns_3d),
+                    "avg_return_5d": _avg(returns_5d),
+                    "avg_excess_return_5d": _avg(excess_5d),
+                }
+            )
+
+        items.sort(
+            key=lambda row: (
+                row.get("avg_excess_return_5d", 0.0),
+                row.get("hit_rate_5d", 0.0),
+                row.get("sample_count", 0),
+            ),
+            reverse=True,
+        )
+        return items
+
     def get_details(
         self,
         start_date: str | None = None,

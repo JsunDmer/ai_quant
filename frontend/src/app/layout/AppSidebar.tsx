@@ -2,15 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { apiPost, apiGet } from '../../api/client';
 import type { CreateJobResponse, JobResponse, JobStatus } from '../../api/types';
 import type { ChartPalette } from '../../charts/chartTokens';
-import { TrendingUp, Building2, Search, FileText, PanelLeft, PanelLeftClose, Sun, Moon } from 'lucide-react';
+import { TrendingUp, Building2, Search, FileText, Briefcase, PanelLeft, PanelLeftClose, Sun, Moon } from 'lucide-react';
 
-export type NavKey = 'market' | 'sectors' | 'signals' | 'evaluation';
+export type NavKey = 'market' | 'sectors' | 'signals' | 'evaluation' | 'portfolio';
 
 const NAV_ICONS: Record<NavKey, React.ReactNode> = {
   market: <TrendingUp size={18} />,
   sectors: <Building2 size={18} />,
   signals: <Search size={18} />,
   evaluation: <FileText size={18} />,
+  portfolio: <Briefcase size={18} />,
 };
 
 type JobResultSummary = NonNullable<JobResponse['result_summary']>;
@@ -106,6 +107,7 @@ export function AppSidebar(props: {
     { key: 'sectors' as NavKey, label: '板块分析', icon: NAV_ICONS.sectors },
     { key: 'signals' as NavKey, label: '个股分析', icon: NAV_ICONS.signals },
     { key: 'evaluation' as NavKey, label: '评估报告', icon: NAV_ICONS.evaluation },
+    { key: 'portfolio' as NavKey, label: '组合与模拟', icon: NAV_ICONS.portfolio },
   ];
 
   const chartPaletteButtons = (compact: boolean) => (

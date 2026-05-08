@@ -121,3 +121,48 @@ def test_compute_index_forward_return_from_snapshot(monkeypatch):
     value = evaluator._compute_index_forward_return("000300", "2024-01-15", 3)
     assert value is not None
     assert round(value, 4) == 2.5049
+
+
+def test_get_type_source_comparison_groups_rows():
+    evaluator = RecommendationEvaluator()
+    rows = [
+        RecommendationEvaluation(
+            recommendation_date="2024-01-15",
+            recommendation_type="stock_signal",
+            source="signal",
+            stock_code="000001",
+            return_1d=1.0,
+            return_3d=2.0,
+            return_5d=3.0,
+            excess_return_5d=0.8,
+        ),
+        RecommendationEvaluation(
+            recommendation_date="2024-01-16",
+            recommendation_type="stock_signal",
+            source="signal",
+            stock_code="000002",
+            return_1d=-1.0,
+            return_3d=1.5,
+            return_5d=1.0,
+            excess_return_5d=0.2,
+        ),
+        RecommendationEvaluation(
+            recommendation_date="2024-01-16",
+            recommendation_type="sector_candidate",
+            source="sector_candidate",
+            stock_code="300001",
+            return_1d=0.5,
+            return_3d=0.8,
+            return_5d=-0.3,
+            excess_return_5d=-0.4,
+        ),
+    ]
+    evaluator._load_rows = lambda **kwargs: rows  # type: ignore[method-assign]
+    result = evaluator.get_type_source_comparison()
+    assert len(result) == 2
+    first = result[0]
+    assert "recommendation_type" in first
+    assert "avg_excess_return_5d" in first
+    signal_group = next(item for item in result if item["source"] == "signal")
+    assert signal_group["sample_count"] == 2
+    assert signal_group["hit_rate_5d"] == 100.0

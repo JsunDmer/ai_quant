@@ -4,7 +4,7 @@
 import sqlite3
 import json
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, asdict
 from contextlib import contextmanager
 
@@ -255,6 +255,27 @@ class RecommendationEvaluation:
     is_positive_3d: int = None
     is_positive_5d: int = None
     evaluated_at: str = ""
+    created_at: str = ""
+    id: int = 0
+
+    def __post_init__(self):
+        if not self.created_at:
+            self.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+@dataclass
+class FactorScoreRecord:
+    """因子评分记录（用于可观测性与参数优化）"""
+    trade_date: str = ""
+    stock_code: str = ""
+    stock_name: str = ""
+    sector_name: str = ""
+    signal: str = ""
+    total_score: float = 0.0
+    factor_scores_json: str = "{}"      # {"ma": {"raw":..,"weight":..,"weighted":..}, ...}
+    strategy_params_json: str = "{}"    # 策略参数快照
+    run_id: str = ""
+    strategy_version: str = ""
     created_at: str = ""
     id: int = 0
 
@@ -600,6 +621,33 @@ class Database:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_reco_eval_sector
                 ON recommendation_evaluations(sector_name, recommendation_date)
+            """)
+
+            # 因子评分记录（支持参数优化）
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS factor_scores (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_date TEXT NOT NULL,
+                    stock_code TEXT NOT NULL,
+                    stock_name TEXT,
+                    sector_name TEXT,
+                    signal TEXT,
+                    total_score REAL DEFAULT 0,
+                    factor_scores_json TEXT DEFAULT '{}',
+                    strategy_params_json TEXT DEFAULT '{}',
+                    run_id TEXT DEFAULT '',
+                    strategy_version TEXT DEFAULT '',
+                    created_at TEXT,
+                    UNIQUE(trade_date, stock_code, run_id)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_factor_scores_date
+                ON factor_scores(trade_date)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_factor_scores_code
+                ON factor_scores(stock_code, trade_date)
             """)
 
             # 模拟交易表
@@ -1409,6 +1457,113 @@ class Database:
                 "SELECT DISTINCT recommendation_date FROM recommendation_evaluations ORDER BY recommendation_date DESC"
             ).fetchall()
             return [row["recommendation_date"] for row in rows]
+
+    # ========== 因子评分操作 ==========
+
+    def upsert_factor_score(self, row: FactorScoreRecord) -> bool:
+        """更新或插入因子评分"""
+        with self.get_connection() as conn:
+            try:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO factor_scores
+                    (trade_date, stock_code, stock_name, sector_name, signal, total_score,
+                     factor_scores_json, strategy_params_json, run_id, strategy_version, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row.trade_date,
+                        row.stock_code,
+                        row.stock_name,
+                        row.sector_name,
+                        row.signal,
+                        row.total_score,
+                        row.factor_scores_json,
+                        row.strategy_params_json,
+                        row.run_id,
+                        row.strategy_version,
+                        row.created_at,
+                    ),
+                )
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"保存因子评分失败: {e}")
+                return False
+
+    def batch_upsert_factor_scores(self, rows: List[FactorScoreRecord]) -> bool:
+        """批量更新或插入因子评分"""
+        if not rows:
+            return True
+        with self.get_connection() as conn:
+            try:
+                for row in rows:
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO factor_scores
+                        (trade_date, stock_code, stock_name, sector_name, signal, total_score,
+                         factor_scores_json, strategy_params_json, run_id, strategy_version, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            row.trade_date,
+                            row.stock_code,
+                            row.stock_name,
+                            row.sector_name,
+                            row.signal,
+                            row.total_score,
+                            row.factor_scores_json,
+                            row.strategy_params_json,
+                            row.run_id,
+                            row.strategy_version,
+                            row.created_at,
+                        ),
+                    )
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"批量保存因子评分失败: {e}")
+                return False
+
+    def get_factor_scores(
+        self,
+        trade_date: str | None = None,
+        stock_code: str | None = None,
+        limit: int = 5000,
+    ) -> List[FactorScoreRecord]:
+        """查询因子评分记录"""
+        sql = "SELECT * FROM factor_scores WHERE 1=1"
+        params: list[Any] = []
+        if trade_date:
+            sql += " AND trade_date = ?"
+            params.append(trade_date)
+        if stock_code:
+            sql += " AND stock_code = ?"
+            params.append(stock_code)
+        sql += " ORDER BY trade_date DESC, total_score DESC LIMIT ?"
+        params.append(limit)
+        with self.get_connection() as conn:
+            db_rows = conn.execute(sql, tuple(params)).fetchall()
+            return [FactorScoreRecord(**dict(db_row)) for db_row in db_rows]
+
+    def get_factor_scores_range(
+        self,
+        start_date: str,
+        end_date: str,
+        limit: int = 20000,
+    ) -> List[FactorScoreRecord]:
+        """按日期范围查询因子评分记录"""
+        with self.get_connection() as conn:
+            db_rows = conn.execute(
+                """
+                SELECT * FROM factor_scores
+                WHERE trade_date >= ? AND trade_date <= ?
+                ORDER BY trade_date DESC, total_score DESC
+                LIMIT ?
+                """,
+                (start_date, end_date, limit),
+            ).fetchall()
+            return [FactorScoreRecord(**dict(db_row)) for db_row in db_rows]
 
     # ========== 模拟交易操作 ==========
 

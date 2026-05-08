@@ -66,6 +66,9 @@ def test_pipeline_diagnostics_counts_candidate_and_signal_steps(monkeypatch):
         def batch_upsert_sector_stock_recommendations(self, recs):
             return True
 
+        def batch_upsert_factor_scores(self, rows):
+            return True
+
         def upsert_stock_signal(self, signal):
             return True
 
@@ -154,6 +157,9 @@ def test_pipeline_no_signal_reason_codes_include_all_hold(monkeypatch):
             return True
 
         def batch_upsert_sector_stock_recommendations(self, recs):
+            return True
+
+        def batch_upsert_factor_scores(self, rows):
             return True
 
         def upsert_stock_signal(self, signal):

@@ -26,6 +26,7 @@ class TestDatabaseTables:
             assert "sector_recommendations" in tables
             assert "sector_stock_recommendations" in tables
             assert "recommendation_evaluations" in tables
+            assert "factor_scores" in tables
             assert "stock_signals" in tables
             assert "followed_stocks" in tables
             assert "analysis_records" in tables
@@ -384,6 +385,38 @@ class TestRecommendationEvaluation:
             )
             assert len(queried) == 1
             assert queried[0].stock_code == "300750"
+
+
+class TestFactorScores:
+    def test_upsert_and_query(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            os.environ["DB_PATH"] = db_path
+            if 'backend.data.db' in sys.modules:
+                del sys.modules['backend.data.db']
+            if 'backend.config' in sys.modules:
+                del sys.modules['backend.config']
+            from backend.data.db import Database, FactorScoreRecord
+            db = Database(db_path)
+
+            row = FactorScoreRecord(
+                trade_date="2024-01-15",
+                stock_code="600519",
+                stock_name="贵州茅台",
+                sector_name="白酒",
+                signal="buy",
+                total_score=38.6,
+                factor_scores_json='{"ma":{"raw":25.0,"weight":1.1,"weighted":27.5}}',
+                strategy_params_json='{"weight_ma":1.1}',
+                run_id="run_1",
+                strategy_version="quant_v2",
+            )
+            assert db.upsert_factor_score(row) is True
+
+            queried = db.get_factor_scores(trade_date="2024-01-15")
+            assert len(queried) == 1
+            assert queried[0].stock_code == "600519"
+            assert queried[0].total_score == 38.6
 
 
 class TestBackwardCompatibility:

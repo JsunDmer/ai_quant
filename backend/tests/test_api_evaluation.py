@@ -44,3 +44,67 @@ def test_recommendation_run_recent(monkeypatch):
     assert payload["recent_days"] == 20
     assert payload["evaluated"] == 7
 
+
+def test_recommendation_compare_shape(monkeypatch):
+    monkeypatch.setattr(
+        evaluation_route.recommendation_evaluator,
+        "get_type_source_comparison",
+        lambda **kwargs: [
+            {
+                "recommendation_type": "stock_signal",
+                "source": "signal",
+                "sample_count": 12,
+                "hit_rate_5d": 58.3,
+                "avg_return_5d": 1.2,
+                "avg_excess_return_5d": 0.4,
+            }
+        ],
+    )
+    app = create_app()
+    c = TestClient(app)
+    r = c.get("/api/evaluation/recommendations/compare")
+    assert r.status_code == 200
+    payload = r.json()
+    assert isinstance(payload["items"], list)
+    assert payload["items"][0]["recommendation_type"] == "stock_signal"
+
+
+def test_portfolio_suggest_shape(monkeypatch):
+    monkeypatch.setattr(
+        evaluation_route.portfolio_builder,
+        "suggest",
+        lambda **kwargs: {"trade_date": "2024-01-15", "summary": {"selected_count": 3}, "items": []},
+    )
+    app = create_app()
+    c = TestClient(app)
+    r = c.get("/api/evaluation/portfolio/suggest?top_n=6")
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["summary"]["selected_count"] == 3
+
+
+def test_simulation_run_full(monkeypatch):
+    monkeypatch.setattr(evaluation_route.trade_simulator, "run_full_simulation", lambda: {"created": 5, "closed": 2})
+    app = create_app()
+    c = TestClient(app)
+    r = c.post("/api/evaluation/simulation/run")
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["mode"] == "full"
+    assert payload["created"] == 5
+
+
+def test_optimizer_run_shape(monkeypatch):
+    monkeypatch.setattr(
+        evaluation_route.strategy_parameter_optimizer,
+        "run",
+        lambda **kwargs: {"status": "ok", "sample_count": 88, "best": {"name": "trial_2"}},
+    )
+    app = create_app()
+    c = TestClient(app)
+    r = c.post("/api/evaluation/optimizer/run?trials=10")
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["status"] == "ok"
+    assert payload["sample_count"] == 88
+

@@ -6,6 +6,7 @@ import { MarketPage } from './pages/MarketPage'
 import { SectorsPage } from './pages/SectorsPage'
 import { SignalsPage } from './pages/SignalsPage'
 import { EvaluationPage } from './pages/EvaluationPage'
+import { PortfolioPage } from './pages/PortfolioPage'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import type { ChartPalette } from './charts/chartTokens'
 
@@ -45,7 +46,8 @@ function App() {
           {active === 'market' ? <MarketPage refreshKey={analysisRefreshKey} chartPalette={chartPalette} /> : null}
           {active === 'sectors' ? <SectorsPage refreshKey={analysisRefreshKey} /> : null}
           {active === 'signals' ? <SignalsPage refreshKey={analysisRefreshKey} /> : null}
-          {active === 'evaluation' ? <EvaluationPage refreshKey={analysisRefreshKey} /> : null}
+          {active === 'evaluation' ? <EvaluationPage refreshKey={analysisRefreshKey} chartPalette={chartPalette} /> : null}
+          {active === 'portfolio' ? <PortfolioPage refreshKey={analysisRefreshKey} chartPalette={chartPalette} /> : null}
         </div>
       </ErrorBoundary>
     </AppLayout>

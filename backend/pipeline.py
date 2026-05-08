@@ -33,6 +33,7 @@ from backend.strategy.quant_strategy import QuantStrategy
 from backend.data.stock_data import StockData
 from backend.data.db import (
     Database,
+    FactorScoreRecord,
     MarketSnapshot,
     SectorRecommendation,
     SectorStockRecommendation,
@@ -325,7 +326,8 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
         'trade_date': trade_date,
         'data_date': data_date,
         'run_id': f"{trade_date.replace('-', '')}_{int(time.time())}",
-        'strategy_version': 'quant_strategy_v1',
+        'strategy_version': 'quant_strategy_v2_factor',
+        'strategy_params': {},
         'market_snapshot': None,
         'sector_recommendations': [],
         'sector_top_stocks': {},
@@ -343,6 +345,10 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
     strategy = QuantStrategy()
     stock_db = StockData()
     db = Database()
+    if hasattr(strategy, "get_params"):
+        result["strategy_params"] = strategy.get_params()
+    else:
+        result["strategy_params"] = {}
     
     # Step 2: 市场快照采集
     logger.info("Step 1/5: 采集市场快照")
@@ -729,6 +735,7 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
     stage_started_at = time.time()
     try:
         signals = []
+        factor_score_rows: List[FactorScoreRecord] = []
         diagnostics["signal_generation"]["candidates_input"] = len(candidate_stocks)
         for candidate in candidate_stocks:
             try:
@@ -748,6 +755,21 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
                 signal_name = analysis.get('signal', 'unknown')
                 signal_counts = diagnostics["signal_generation"]["signal_counts"]
                 signal_counts[signal_name] = signal_counts.get(signal_name, 0) + 1
+                strategy_params_snapshot = analysis.get("strategy_params", result.get("strategy_params", {}))
+                factor_score_rows.append(
+                    FactorScoreRecord(
+                        trade_date=trade_date,
+                        stock_code=code,
+                        stock_name=name,
+                        sector_name=sector_name,
+                        signal=str(signal_name),
+                        total_score=float(analysis.get("score", 0.0) or 0.0),
+                        factor_scores_json=json.dumps(analysis.get("factor_scores", {}), ensure_ascii=False),
+                        strategy_params_json=json.dumps(strategy_params_snapshot, ensure_ascii=False),
+                        run_id=str(result.get("run_id", "") or ""),
+                        strategy_version=str(result.get("strategy_version", "") or ""),
+                    )
+                )
                 
                 # 只保留买入信号
                 if analysis['signal'] in ['strong_buy', 'buy']:
@@ -771,7 +793,7 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
                         sector_name=sector_name,
                         signal=analysis['signal'],
                         confidence=analysis['confidence'],
-                        factors_json=json.dumps(analysis['factors'])
+                        factors_json=json.dumps(analysis['factors'], ensure_ascii=False)
                     )
                     db.upsert_stock_signal(db_signal)
                     
@@ -783,6 +805,13 @@ def run_post_close_pipeline(trade_date: Optional[str] = None, enabled_sources: O
                         "error": str(e),
                     })
                 logger.error(f"分析 {candidate.get('code')} 失败: {e}")
+        if factor_score_rows:
+            saved = db.batch_upsert_factor_scores(factor_score_rows)
+            diagnostics["signal_generation"]["factor_score_count"] = len(factor_score_rows)
+            diagnostics["signal_generation"]["factor_score_saved_count"] = len(factor_score_rows) if saved else 0
+            if not saved:
+                result["errors"].append("signal_generation: save_factor_scores_failed")
+                result["status"] = "degraded"
         
         result['stock_signals'] = signals
         diagnostics["signal_generation"]["buy_signal_count"] = len(signals)
