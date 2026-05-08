@@ -2,6 +2,7 @@
 推荐评估引擎
 评估个股推荐在 T+1/T+3/T+5 的收益、命中率与相对板块超额收益。
 """
+import json
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -75,6 +76,62 @@ class RecommendationEvaluator:
                 return None
             product *= (1 + float(found.change_pct or 0) / 100)
         return round((product - 1) * 100, 4)
+
+    def _extract_index_change_from_snapshot(self, trade_date: str, index_code: str) -> Optional[float]:
+        snapshot = self._db.get_market_snapshot(trade_date)
+        if not snapshot or not snapshot.indices_json:
+            return None
+        try:
+            indices = json.loads(snapshot.indices_json)
+        except Exception:
+            return None
+        if not isinstance(indices, list):
+            return None
+        norm_code = (index_code or "").strip()
+        for item in indices:
+            if not isinstance(item, dict):
+                continue
+            code = str(item.get("code", "")).strip()
+            if code != norm_code:
+                continue
+            raw_change = item.get("change")
+            try:
+                return float(raw_change or 0)
+            except Exception:
+                return None
+        return None
+
+    def _compute_index_forward_return(self, index_code: str, recommendation_date: str, horizon_days: int) -> Optional[float]:
+        """使用 market_snapshots 的指数涨跌幅估算指数未来 N 日复合收益。"""
+        future_dates = self._db.get_next_n_trading_dates(recommendation_date, horizon_days)
+        if len(future_dates) < horizon_days:
+            return None
+        dates = future_dates[:horizon_days]
+        product = 1.0
+        for date in dates:
+            day_change = self._extract_index_change_from_snapshot(date, index_code=index_code)
+            if day_change is None:
+                return None
+            product *= (1 + day_change / 100)
+        return round((product - 1) * 100, 4)
+
+    def _compute_simple_momentum_baseline(self, recommendation_date: str, horizon_days: int) -> Optional[float]:
+        """
+        简单动量基准：
+        选取 recommendation_date 当天涨幅最高的板块，计算其未来 N 日复合收益。
+        """
+        perfs = self._db.get_sector_daily_performance(recommendation_date)
+        if not perfs:
+            return None
+        best = max(perfs, key=lambda item: float(item.change_pct or 0))
+        sector_name = str(best.sector_name or "").strip()
+        if not sector_name:
+            return None
+        return self._compute_sector_forward_return(
+            sector_name=sector_name,
+            recommendation_date=recommendation_date,
+            horizon_days=horizon_days,
+        )
 
     @staticmethod
     def _to_positive_flag(value: Optional[float]) -> Optional[int]:
@@ -224,6 +281,24 @@ class RecommendationEvaluator:
                 sector_name=sector_name,
                 limit=limit,
             )
+        if start_date and not end_date:
+            return self._db.get_recommendation_evaluations_range(
+                start_date,
+                "9999-12-31",
+                recommendation_type=recommendation_type,
+                source=source,
+                sector_name=sector_name,
+                limit=limit,
+            )
+        if end_date and not start_date:
+            return self._db.get_recommendation_evaluations_range(
+                "0001-01-01",
+                end_date,
+                recommendation_type=recommendation_type,
+                source=source,
+                sector_name=sector_name,
+                limit=limit,
+            )
         return self._db.get_recommendation_evaluations(
             recommendation_date=None,
             recommendation_type=recommendation_type,
@@ -249,11 +324,55 @@ class RecommendationEvaluator:
             sector_name=sector_name,
         )
 
+        hs300_cache: Dict[Tuple[str, str], Optional[float]] = {}
+        momentum_cache: Dict[Tuple[str, str], Optional[float]] = {}
+
         def _metric(horizon: str) -> Dict:
             attr = f"return_{horizon}"
             excess_attr = f"excess_return_{horizon}"
             values = [getattr(row, attr) for row in rows if getattr(row, attr) is not None]
             excess_values = [getattr(row, excess_attr) for row in rows if getattr(row, excess_attr) is not None]
+            sector_baseline_values = [
+                getattr(row, f"sector_return_{horizon}")
+                for row in rows
+                if getattr(row, f"sector_return_{horizon}") is not None
+            ]
+
+            hs300_values: List[float] = []
+            momentum_values: List[float] = []
+            hs300_excess_values: List[float] = []
+            momentum_excess_values: List[float] = []
+
+            horizon_days = int(horizon.replace("d", ""))
+            for row in rows:
+                row_return = getattr(row, attr)
+                if row_return is None:
+                    continue
+                date_key = row.recommendation_date
+
+                hs300_key = (date_key, horizon)
+                if hs300_key not in hs300_cache:
+                    hs300_cache[hs300_key] = self._compute_index_forward_return(
+                        index_code="000300",
+                        recommendation_date=date_key,
+                        horizon_days=horizon_days,
+                    )
+                hs300_return = hs300_cache[hs300_key]
+                if hs300_return is not None:
+                    hs300_values.append(hs300_return)
+                    hs300_excess_values.append(round(row_return - hs300_return, 4))
+
+                momentum_key = (date_key, horizon)
+                if momentum_key not in momentum_cache:
+                    momentum_cache[momentum_key] = self._compute_simple_momentum_baseline(
+                        recommendation_date=date_key,
+                        horizon_days=horizon_days,
+                    )
+                momentum_return = momentum_cache[momentum_key]
+                if momentum_return is not None:
+                    momentum_values.append(momentum_return)
+                    momentum_excess_values.append(round(row_return - momentum_return, 4))
+
             hit_count = sum(1 for value in values if value > 0)
             evaluated_count = len(values)
             return {
@@ -261,7 +380,28 @@ class RecommendationEvaluator:
                 "hit_count": hit_count,
                 "hit_rate": round(hit_count / evaluated_count * 100, 1) if evaluated_count > 0 else 0.0,
                 "avg_return": round(sum(values) / evaluated_count, 4) if evaluated_count > 0 else 0.0,
-                "avg_excess_return": round(sum(excess_values) / len(excess_values), 4) if excess_values else 0.0,
+                "avg_excess_return_sector": round(sum(excess_values) / len(excess_values), 4) if excess_values else 0.0,
+                "avg_baseline_sector_return": (
+                    round(sum(sector_baseline_values) / len(sector_baseline_values), 4)
+                    if sector_baseline_values
+                    else 0.0
+                ),
+                "avg_baseline_hs300_return": (
+                    round(sum(hs300_values) / len(hs300_values), 4) if hs300_values else 0.0
+                ),
+                "avg_excess_return_hs300": (
+                    round(sum(hs300_excess_values) / len(hs300_excess_values), 4)
+                    if hs300_excess_values
+                    else 0.0
+                ),
+                "avg_baseline_momentum_return": (
+                    round(sum(momentum_values) / len(momentum_values), 4) if momentum_values else 0.0
+                ),
+                "avg_excess_return_momentum": (
+                    round(sum(momentum_excess_values) / len(momentum_excess_values), 4)
+                    if momentum_excess_values
+                    else 0.0
+                ),
             }
 
         return {

@@ -27,6 +27,22 @@ class StockData:
         self._tushare_pro = None
         self._tushare_ready = False
         self._auction_cache: Dict[str, Dict[str, Any]] = {}
+        self._kline_cache: Dict[str, Dict[str, Any]] = {}
+        self._perf_cache: Dict[str, Dict[str, Any]] = {}
+        self._kline_cache_ttl = 600
+        self._perf_cache_ttl = 3600
+
+    def _ttl_get(self, cache: Dict[str, Dict[str, Any]], key: str, ttl_seconds: int):
+        item = cache.get(key)
+        if not item:
+            return None
+        if (time.time() - float(item.get("ts", 0))) > ttl_seconds:
+            cache.pop(key, None)
+            return None
+        return item.get("value")
+
+    def _ttl_set(self, cache: Dict[str, Dict[str, Any]], key: str, value: Any):
+        cache[key] = {"ts": time.time(), "value": value}
 
     def _get_spot_data(self) -> pd.DataFrame:
         now = time.time()
@@ -302,6 +318,11 @@ class StockData:
     def get_kline_data(self, stock_code: str, days: int = 60) -> pd.DataFrame:
         """获取 K 线数据"""
         try:
+            cache_key = f"{stock_code}:{days}"
+            cached = self._ttl_get(self._kline_cache, cache_key, self._kline_cache_ttl)
+            if isinstance(cached, pd.DataFrame):
+                return cached.copy()
+
             print(f"[StockData] 获取K线数据 {stock_code} ...")
             end_date = datetime.now().strftime('%Y%m%d')
             start_date = (datetime.now() - timedelta(days=days)).strftime('%Y%m%d')
@@ -327,9 +348,11 @@ class StockData:
                 if df.empty:
                     continue
                 result_df = self._normalize_kline_df(df)
+                self._ttl_set(self._kline_cache, cache_key, result_df.copy())
                 print(f"[StockData] 获取K线数据 {stock_code} 完成，共 {len(result_df)} 条")
                 return result_df
             print(f"[StockData] 获取K线数据 {stock_code} 失败: 所有数据源均无数据")
+            self._ttl_set(self._kline_cache, cache_key, pd.DataFrame())
             return pd.DataFrame()
         except Exception as e:
             print(f"[StockData] 获取K线数据 {stock_code} 失败: {e}")
@@ -517,6 +540,11 @@ class StockData:
                 'reason': str
             }
         """
+        cache_key = f"{stock_code}:{min_net_profit}:{min_yoy}"
+        cached = self._ttl_get(self._perf_cache, cache_key, self._perf_cache_ttl)
+        if isinstance(cached, dict):
+            return dict(cached)
+
         # 优先获取最新季度数据（2026Q1）
         result = self.get_financial_data(stock_code, year=2026, quarter=1)
 
@@ -525,7 +553,7 @@ class StockData:
             result = self.get_financial_data(stock_code, year=2025, quarter=4)
 
         if not result.get('has_data'):
-            return {
+            final_result = {
                 'pass': False,
                 'has_financial_data': False,
                 'net_profit': 0,
@@ -533,6 +561,8 @@ class StockData:
                 'roe': 0,
                 'reason': '无财报数据'
             }
+            self._ttl_set(self._perf_cache, cache_key, final_result)
+            return final_result
 
         net_profit = result.get('net_profit', 0)
         yoy = result.get('net_profit_yoy', 0)
@@ -540,7 +570,7 @@ class StockData:
 
         # 净利润规模检查
         if net_profit < min_net_profit:
-            return {
+            final_result = {
                 'pass': False,
                 'has_financial_data': True,
                 'net_profit': net_profit,
@@ -548,10 +578,12 @@ class StockData:
                 'roe': roe,
                 'reason': f'净利润不足{int(net_profit/1e8)}亿'
             }
+            self._ttl_set(self._perf_cache, cache_key, final_result)
+            return final_result
 
         # 净利润同比检查
         if yoy < min_yoy:
-            return {
+            final_result = {
                 'pass': False,
                 'has_financial_data': True,
                 'net_profit': net_profit,
@@ -559,8 +591,10 @@ class StockData:
                 'roe': roe,
                 'reason': f'净利润同比{yoy:.1f}%下降'
             }
+            self._ttl_set(self._perf_cache, cache_key, final_result)
+            return final_result
 
-        return {
+        final_result = {
             'pass': True,
             'has_financial_data': True,
             'net_profit': net_profit,
@@ -568,6 +602,8 @@ class StockData:
             'roe': roe,
             'reason': '业绩达标'
         }
+        self._ttl_set(self._perf_cache, cache_key, final_result)
+        return final_result
 
     @staticmethod
     def _to_baostock_code(stock_code: str) -> str:

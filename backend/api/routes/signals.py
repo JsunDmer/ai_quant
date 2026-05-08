@@ -1,5 +1,7 @@
 import json
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from fastapi import APIRouter, Query
 
@@ -8,6 +10,8 @@ from backend.data.stock_data import stock_data
 
 
 router = APIRouter(prefix="/api/signals", tags=["signals"])
+_LATEST_CACHE: dict[str, dict] = {}
+_LATEST_CACHE_TTL_SECONDS = 5
 
 
 @router.get("/stock/{stock_code}/kline")
@@ -51,7 +55,15 @@ def get_stock_financial(stock_code: str):
 def get_latest_signals(
     limit: int = Query(default=200, ge=1, le=1000),
     signal: str | None = None,
+    include_realtime: bool = Query(default=False),
+    include_auction: bool = Query(default=False),
 ):
+    cache_key = f"{limit}:{signal or ''}:{int(include_realtime)}:{int(include_auction)}"
+    cache_hit = _LATEST_CACHE.get(cache_key)
+    now = time.time()
+    if cache_hit and (now - float(cache_hit.get("ts", 0))) <= _LATEST_CACHE_TTL_SECONDS:
+        return cache_hit["value"]
+
     rows = db.get_latest_stock_signals(signal=signal, limit=limit)
 
     def _loads(s, default):
@@ -90,14 +102,22 @@ def get_latest_signals(
             plain_codes.append(plain)
 
     in_test = bool(os.environ.get("PYTEST_CURRENT_TEST"))
-    quotes = stock_data.get_batch_quotes(plain_codes) if (plain_codes and not in_test) else []
+    should_fetch_realtime = include_realtime and (not in_test)
+    quotes = stock_data.get_batch_quotes(plain_codes) if (plain_codes and should_fetch_realtime) else []
     quote_map = {str(q.get("code", "")).strip(): q for q in quotes}
 
     auction_map: dict[str, dict] = {}
-    if not in_test:
-        # 竞价接口逐只查询，限制请求数量避免接口阻塞
-        for code in plain_codes[:20]:
-            auction_map[code] = stock_data.get_open_auction_snapshot(code)
+    should_fetch_auction = include_auction and (not in_test)
+    if should_fetch_auction:
+        # 并发获取竞价，避免逐只串行导致接口阻塞
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            future_map = {pool.submit(stock_data.get_open_auction_snapshot, code): code for code in plain_codes[:20]}
+            for f in as_completed(future_map):
+                code = future_map[f]
+                try:
+                    auction_map[code] = f.result(timeout=0.8)
+                except Exception:
+                    auction_map[code] = {}
 
     items = []
     for r in rows:
@@ -134,5 +154,7 @@ def get_latest_signals(
         )
 
     trade_date = items[0]["trade_date"] if items else None
-    return {"trade_date": trade_date, "items": items}
+    payload = {"trade_date": trade_date, "items": items}
+    _LATEST_CACHE[cache_key] = {"ts": now, "value": payload}
+    return payload
 

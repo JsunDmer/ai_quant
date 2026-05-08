@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pandas as pd
@@ -88,6 +89,8 @@ def test_get_summary_metrics():
     ]
 
     evaluator._load_rows = lambda **kwargs: rows  # type: ignore[method-assign]
+    evaluator._compute_index_forward_return = lambda index_code, recommendation_date, horizon_days: 0.5  # type: ignore[method-assign]
+    evaluator._compute_simple_momentum_baseline = lambda recommendation_date, horizon_days: 0.8  # type: ignore[method-assign]
 
     summary = evaluator.get_summary()
     assert summary["total_recommendations"] == 2
@@ -95,3 +98,26 @@ def test_get_summary_metrics():
     assert summary["t1"]["hit_count"] == 1
     assert summary["t1"]["hit_rate"] == 50.0
     assert summary["t5"]["evaluated_count"] == 1
+    assert summary["t1"]["avg_baseline_hs300_return"] == 0.5
+    assert summary["t1"]["avg_baseline_momentum_return"] == 0.8
+    assert "avg_excess_return_sector" in summary["t1"]
+
+
+def test_compute_index_forward_return_from_snapshot(monkeypatch):
+    evaluator = RecommendationEvaluator()
+    monkeypatch.setattr(
+        evaluator._db,
+        "get_next_n_trading_dates",
+        lambda from_date, n: ["2024-01-16", "2024-01-17", "2024-01-18"][:n],
+    )
+
+    snapshots = {
+        "2024-01-16": SimpleNamespace(indices_json=json.dumps([{"code": "000300", "change": 1.0}])),
+        "2024-01-17": SimpleNamespace(indices_json=json.dumps([{"code": "000300", "change": -0.5}])),
+        "2024-01-18": SimpleNamespace(indices_json=json.dumps([{"code": "000300", "change": 2.0}])),
+    }
+    monkeypatch.setattr(evaluator._db, "get_market_snapshot", lambda date: snapshots.get(date))
+
+    value = evaluator._compute_index_forward_return("000300", "2024-01-15", 3)
+    assert value is not None
+    assert round(value, 4) == 2.5049
