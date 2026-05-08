@@ -63,7 +63,9 @@
 .ui-table-scroll {
   margin-top: 12px;
   overflow-x: auto;
+  overflow-y: visible;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   background: var(--bg-card);

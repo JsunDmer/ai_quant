@@ -63,6 +63,7 @@ export function SectorsPage(props: { refreshKey: number }) {
             const dir = String(it.direction ?? '').toLowerCase();
             const score = Number(it.rec_score) || 0;
             const conf = String(it.confidence ?? '—');
+            const topStocks = Array.isArray(it.top_stocks) ? it.top_stocks : [];
             
             // 先按 direction 判断趋势，再用 rec_score 兜底，保证图标语义统一
             const trendByDirection =
@@ -124,6 +125,64 @@ export function SectorsPage(props: { refreshKey: number }) {
                       {it.rec_score !== undefined ? Number(it.rec_score).toFixed(2) : '—'}
                     </div>
                   </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>推荐个股</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      {String(it.stocks_source ?? '') === 'signal'
+                        ? '来源：技术信号'
+                        : String(it.stocks_source ?? '') === 'sector_cache'
+                          ? '来源：板块成分股'
+                          : '来源：暂无'}
+                    </div>
+                  </div>
+
+                  {topStocks.length > 0 ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
+                      {topStocks.slice(0, 4).map((stock: any, stockIdx: number) => {
+                        const stockName = String(stock?.name ?? stock?.stock_name ?? '—');
+                        const stockCode = String(stock?.code ?? stock?.stock_code ?? '');
+                        const changeRaw = Number(stock?.change);
+                        const hasChange = Number.isFinite(changeRaw);
+                        const changeColor = hasChange ? (changeRaw > 0 ? 'var(--accent-red)' : changeRaw < 0 ? 'var(--accent-green)' : 'var(--text-muted)') : 'var(--text-muted)';
+                        const changeText = hasChange ? `${changeRaw > 0 ? '+' : ''}${changeRaw.toFixed(2)}%` : '—';
+
+                        return (
+                          <div
+                            key={`${stockCode || stockName}-${stockIdx}`}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: 10,
+                              padding: '8px 10px',
+                              borderRadius: 8,
+                              background: 'var(--bg-secondary)',
+                              border: '1px solid var(--border-color)',
+                            }}
+                          >
+                            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {stockName}
+                              </div>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: '"JetBrains Mono", monospace' }}>
+                                {stockCode || '--'}
+                              </div>
+                            </div>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: changeColor, fontFamily: '"JetBrains Mono", monospace' }}>
+                              {changeText}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', padding: '10px 12px', borderRadius: 8, border: '1px dashed var(--border-color)', background: 'var(--bg-secondary)' }}>
+                      暂无可用个股（可先执行一次完整分析后刷新）。
+                    </div>
+                  )}
                 </div>
               </div>
             );

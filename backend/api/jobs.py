@@ -91,7 +91,15 @@ class InMemoryJobStore:
                 "status": result.get("status"),
                 "trade_date": result.get("trade_date"),
                 "data_date": result.get("data_date"),
+                "sectors": len(result.get("sector_recommendations", [])),
+                "sector_top_stocks": sum(
+                    len(stocks)
+                    for stocks in result.get("sector_top_stocks", {}).values()
+                ),
+                "signals": len(result.get("stock_signals", [])),
+                "auction_filtered": len(result.get("auction_filtered_out", [])),
                 "errors": result.get("errors", []),
+                "diagnostics": result.get("diagnostics", {}),
             }
             with self._lock:
                 job = self._jobs.get(task_id)

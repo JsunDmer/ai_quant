@@ -46,6 +46,9 @@ class Config:
     
     # 数据库路径（相对路径相对于 backend/，与进程 cwd 无关）
     DB_PATH: str = _RESOLVED_DB_PATH
+
+    # Tushare 配置（可选，缺失时自动降级到现有数据源）
+    TUSHARE_TOKEN: str = os.getenv("TUSHARE_TOKEN", "").strip()
     
     # AI 分析配置
     AI_MAX_TOKENS: int = 4096

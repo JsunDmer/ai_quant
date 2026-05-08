@@ -45,9 +45,9 @@ need_cmd() {
 start_api() {
   need_cmd python
   need_cmd uvicorn
-  echo "🟦 启动 FastAPI: http://127.0.0.1:8000"
+  echo "🟦 启动 FastAPI: http://127.0.0.1:8010"
   # 在 backend 目录下启动，保证 load_dotenv() 能读到 backend/.env；PYTHONPATH 指向仓库根以解析 backend 包
-  (cd "${BACKEND_DIR}" && PYTHONPATH="${REPO_ROOT}" uvicorn backend.api.main:app --host 127.0.0.1 --port 8000) &
+  (cd "${BACKEND_DIR}" && PYTHONPATH="${REPO_ROOT}" uvicorn backend.api.main:app --host 127.0.0.1 --port 8010) &
   API_PID=$!
 }
 
